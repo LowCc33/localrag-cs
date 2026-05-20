@@ -1,0 +1,32 @@
+# LocalRAG-CS 项目依赖
+# 客服知识库问答系统
+
+# ========== FastAPI Web框架（第4阶段新增） ==========
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+jinja2>=3.1.0
+python-multipart>=0.0.6
+
+# ========== RAG核心依赖 ==========
+# 向量编码
+sentence-transformers>=2.3.0
+
+# llama.cpp HTTP API 调用
+requests>=2.30.0
+
+# 工具库
+scikit-learn>=1.3.0
+numpy>=1.24.0
+pandas>=2.0.0
+tqdm>=4.65.0
+
+# 配置管理
+python-dotenv>=1.0.0
+
+# ========== 数据存储 ==========
+# Elasticsearch客户端
+elasticsearch>=8.0.0,<9.0.0
+
+# ========== 测试 ==========
+pytest>=7.3.0
+pytest-asyncio>=0.21.0

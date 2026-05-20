@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LocalRAG-CS 客服知识库问答系统</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- 自定义样式 -->
+    <style>
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f1f1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #c1c1c1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #a8a8a8;
+        }
+        
+        /* 加载动画 */
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse-fast {
+            animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        /* 文档卡片悬停效果 */
+        .doc-card {
+            transition: all 0.2s ease-in-out;
+        }
+        .doc-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+        }
+        
+        /* 代码块样式 */
+        .code-block {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 0.875rem;
+        }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+    <!-- 顶部导航栏 -->
+    <nav class="bg-white shadow-sm border-b border-gray-200">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex justify-between h-16">
+                <div class="flex items-center">
+                    <div class="flex-shrink-0 flex items-center gap-3">
+                        <!-- Logo图标 -->
+                        <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">
+                            R
+                        </div>
+                        <div>
+                            <h1 class="text-xl font-bold text-gray-900">LocalRAG-CS</h1>
+                            <p class="text-xs text-gray-500">客服知识库问答系统</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-4">
+                    <a href="/docs" target="_blank" class="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                        API文档
+                    </a>
+                    <a href="/api/health" target="_blank" class="text-gray-500 hover:text-green-600 px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                        健康检查
+                    </a>
+                    <div id="status-indicator" class="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+                        <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                        运行中
+                    </div>
+                </div>
+            </div>
+        </div>
+    </nav>
+
+    <!-- 主内容区域 -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+            <!-- 左侧：输入区域 -->
+            <div class="space-y-6">
+                <!-- 问题输入卡片 -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
+                    <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
+                        <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
+                            </svg>
+                            问题输入
+                        </h2>
+                    </div>
+                    <div class="p-6 space-y-4">
+                        <!-- 问题输入框 -->
+                        <div>
+                            <label class="block text-sm font-medium text-gray-700 mb-2">您的问题</label>
+                            <textarea 
+                                id="question-input" 
+                                rows="4" 
+                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all"
+                                placeholder="请输入您的问题，例如：雇主责任险和工伤保险有什么区别？"
+                            ></textarea>
+                        </div>
+                        
+                        <!-- 参数配置 -->
+                        <div class="grid grid-cols-3 gap-4">
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">召回数量</label>
+                                <input type="number" id="top-k" value="10" min="1" max="50" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">重排数量</label>
+                                <input type="number" id="rerank-top-k" value="3" min="1" max="10" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500">
+                            </div>
+                            <div>
+                                <label class="block text-sm font-medium text-gray-700 mb-1">索引名称</label>
+                                <input type="text" id="index-name" value="cs_knowledge_base" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500">
+                            </div>
+                        </div>
+                        
+                        <!-- 提交按钮 -->
+                        <button 
+                            id="submit-btn" 
+                            onclick="submitQuestion()"
+                            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
+                        >
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                            </svg>
+                            <span>开始问答</span>
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- 示例问题 -->
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3">💡 示例问题（点击快速填充）</h3>
+                    <div class="flex flex-wrap gap-2">
+                        <button onclick="setExample('雇主责任险和工伤保险有什么区别？')" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-full transition-colors">
+                            雇主责任险和工伤保险有什么区别？
+                        </button>
+                        <button onclick="setExample('平安雇主险赔偿标准是什么？')" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-full transition-colors">
+                            平安雇主险赔偿标准是什么？
+                        </button>
+                        <button onclick="setExample('员工受伤怎么赔偿？')" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-full transition-colors">
+                            员工受伤怎么赔偿？
+                        </button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 右侧：结果展示区域 -->
+            <div class="space-y-6">
+                <!-- 最终答案卡片 -->
+                <div id="answer-card" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
+                    <div class="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
+                        <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                            </svg>
+                            最终答案
+                        </h2>
+                    </div>
+                    <div class="p-6">
+                        <div id="answer-content" class="prose max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap"></div>
+                    </div>
+                </div>
+                
+                <!-- 检索结果卡片 -->
+                <div id="sources-card" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
+                    <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
+                        <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                            </svg>
+                            检索到的文档
+                        </h2>
+                    </div>
+                    <div class="p-6">
+                        <div id="sources-list" class="space-y-4">
+                            <!-- 动态插入文档卡片 -->
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 耗时统计卡片 -->
+                <div id="latency-card" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
+                    <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
+                        <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
+                            <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                            </svg>
+                            耗时统计
+                        </h2>
+                    </div>
+                    <div class="p-6">
+                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            <div class="text-center p-4 bg-blue-50 rounded-lg">
+                                <div id="latency-total" class="text-2xl font-bold text-blue-600">-</div>
+                                <div class="text-sm text-gray-600 mt-1">总耗时 (ms)</div>
+                            </div>
+                            <div class="text-center p-4 bg-green-50 rounded-lg">
+                                <div id="latency-retrieval" class="text-2xl font-bold text-green-600">-</div>
+                                <div class="text-sm text-gray-600 mt-1">检索 (ms)</div>
+                            </div>
+                            <div class="text-center p-4 bg-orange-50 rounded-lg">
+                                <div id="latency-rerank" class="text-2xl font-bold text-orange-600">-</div>
+                                <div class="text-sm text-gray-600 mt-1">重排 (ms)</div>
+                            </div>
+                            <div class="text-center p-4 bg-purple-50 rounded-lg">
+                                <div id="latency-llm" class="text-2xl font-bold text-purple-600">-</div>
+                                <div class="text-sm text-gray-600 mt-1">LLM生成 (ms)</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 初始状态提示 -->
+                <div id="initial-state" class="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
+                    <div class="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
+                        <svg class="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
+                        </svg>
+                    </div>
+                    <h3 class="text-xl font-semibold text-gray-900 mb-2">开始问答</h3>
+                    <p class="text-gray-500 max-w-md mx-auto">在左侧输入框中输入您的问题，点击"开始问答"按钮，系统将自动检索知识库并生成答案。</p>
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- 页脚 -->
+    <footer class="bg-white border-t border-gray-200 mt-12">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
+            <div class="flex justify-between items-center">
+                <p class="text-sm text-gray-500">LocalRAG-CS © 2026 | 客服知识库问答系统</p>
+                <div class="flex space-x-4">
+                    <span class="text-sm text-gray-400">API版本: v1.0.0</span>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <!-- JavaScript 代码 -->
+    <script>
+        // ============ 全局状态 ============
+        const state = {
+            isLoading: false,
+            apiBaseUrl: window.location.origin
+        };
+
+        // ============ DOM 元素获取 ============
+        const elements = {
+            questionInput: document.getElementById('question-input'),
+            topKInput: document.getElementById('top-k'),
+            rerankTopKInput: document.getElementById('rerank-top-k'),
+            indexNameInput: document.getElementById('index-name'),
+            submitBtn: document.getElementById('submit-btn'),
+            answerCard: document.getElementById('answer-card'),
+            answerContent: document.getElementById('answer-content'),
+            sourcesCard: document.getElementById('sources-card'),
+            sourcesList: document.getElementById('sources-list'),
+            latencyCard: document.getElementById('latency-card'),
+            latencyTotal: document.getElementById('latency-total'),
+            latencyRetrieval: document.getElementById('latency-retrieval'),
+            latencyRerank: document.getElementById('latency-rerank'),
+            latencyLlm: document.getElementById('latency-llm'),
+            initialState: document.getElementById('initial-state')
+        };
+
+        // ============ 工具函数 ============
+        
+        // 设置示例问题
+        function setExample(question) {
+            elements.questionInput.value = question;
+            elements.questionInput.focus();
+        }
+        
+        // 显示加载状态
+        function setLoading(loading) {
+            state.isLoading = loading;
+            elements.submitBtn.disabled = loading;
+            
+            if (loading) {
+                elements.submitBtn.innerHTML = `
+                    <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                    </svg>
+                    <span>处理中...</span>
+                `;
+            } else {
+                elements.submitBtn.innerHTML = `
+                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
+                    </svg>
+                    <span>开始问答</span>
+                `;
+            }
+        }
+        
+        // 隐藏初始状态提示
+        function hideInitialState() {
+            elements.initialState.classList.add('hidden');
+        }
+        
+        // 显示结果卡片
+        function showResultCards() {
+            elements.answerCard.classList.remove('hidden');
+            elements.sourcesCard.classList.remove('hidden');
+            elements.latencyCard.classList.remove('hidden');
+        }
+        
+        // 渲染答案
+        function renderAnswer(answer) {
+            elements.answerContent.textContent = answer;
+        }
+        
+        // 渲染文档来源
+        function renderSources(sources) {
+            if (!sources || sources.length === 0) {
+                elements.sourcesList.innerHTML = `
+                    <div class="text-center py-8 text-gray-500">
+                        <p>未检索到相关文档</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            const html = sources.map((doc, index) => {
+                // 构建分数显示字符串
+                let scoreDisplay = '';
+                const bm25Score = doc.bm25_score !== undefined ? doc.bm25_score : doc.es_score;
+                const vectorScore = doc.vector_score !== undefined ? doc.vector_score : 0;
+                const hasVector = doc.has_vector !== undefined ? doc.has_vector : (doc.vector_score !== undefined);
+                
+                // 判断哪个分数相对更高（BM25是10+量级，向量是0-1量级，需要归一化比较）
+                // BM25通常范围是5-20，向量是0.5-1.0，用相对比例比较
+                const bm25Normalized = (bm25Score - 5) / 15;  // 归一化到0-1
+                const vectorNormalized = vectorScore;
+                
+                const bm25Higher = bm25Normalized > vectorNormalized;
+                
+                if (hasVector && vectorScore > 0) {
+                    // 使用了向量检索，显示两个分数，分高的加粗
+                    const bm25Style = bm25Higher ? 'font-bold' : '';
+                    const vectorStyle = !bm25Higher ? 'font-bold' : '';
+                    
+                    scoreDisplay = `
+                        <span class="${bm25Style}" style="color: #3b82f6;">BM25: ${bm25Score.toFixed(1)}</span>
+                        <span style="color: #9ca3af;"> | </span>
+                        <span class="${vectorStyle}" style="color: #10b981;">向量: ${vectorScore.toFixed(2)}</span>
+                    `;
+                } else {
+                    // 纯BM25，只显示蓝色的BM25分数
+                    scoreDisplay = `<span style="color: #3b82f6;">BM25: ${bm25Score.toFixed(1)}</span>`;
+                }
+                
+                return `
+                <div class="doc-card bg-gray-50 rounded-lg p-4 border border-gray-200">
+                    <div class="flex items-start justify-between mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">
+                                ${index + 1}
+                            </span>
+                            <h4 class="font-semibold text-gray-800 text-sm">${escapeHtml(doc.title || '未命名文档')}</h4>
+                        </div>
+                    </div>
+                    <p class="text-sm text-gray-600 mb-3 line-clamp-3">${escapeHtml(doc.content || '')}</p>
+                    <div class="text-xs">
+                        ${scoreDisplay}
+                    </div>
+                    ${doc.source_file ? `<p class="text-xs text-gray-400 mt-1">来源: ${escapeHtml(doc.source_file)}</p>` : ''}
+                </div>
+            `}).join('');
+            
+            elements.sourcesList.innerHTML = html;
+        }
+        
+        // 渲染耗时统计
+        function renderLatency(latency) {
+            elements.latencyTotal.textContent = Math.round(latency.total_ms || 0);
+            elements.latencyRetrieval.textContent = Math.round(latency.retrieval_ms || 0);
+            elements.latencyRerank.textContent = Math.round(latency.rerank_ms || 0);
+            elements.latencyLlm.textContent = Math.round(latency.llm_ms || 0);
+        }
+        
+        // HTML转义，防止XSS攻击
+        function escapeHtml(text) {
+            if (!text) return '';
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ============ 核心功能 ============
+        
+        // 提交问题
+        async function submitQuestion() {
+            if (state.isLoading) return;
+            
+            // 获取输入值
+            const question = elements.questionInput.value.trim();
+            const topK = parseInt(elements.topKInput.value) || 10;
+            const rerankTopK = parseInt(elements.rerankTopKInput.value) || 3;
+            const indexName = elements.indexNameInput.value.trim() || 'cs_knowledge_base';
+            
+            // 验证输入
+            if (!question) {
+                alert('请输入问题');
+                elements.questionInput.focus();
+                return;
+            }
+            
+            // 设置加载状态
+            setLoading(true);
+            hideInitialState();
+            
+            try {
+                // 调用API
+                const response = await fetch(`${state.apiBaseUrl}/api/ask`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        question: question,
+                        top_k: topK,
+                        rerank_top_k: rerankTopK,
+                        index_name: indexName
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (!response.ok) {
+                    throw new Error(data.detail?.message || `请求失败: ${response.status}`);
+                }
+                
+                // 显示结果
+                showResultCards();
+                renderAnswer(data.answer);
+                renderSources(data.sources);
+                renderLatency(data.latency);
+                
+            } catch (error) {
+                console.error('请求失败:', error);
+                alert('请求失败: ' + error.message);
+                
+                // 显示错误信息
+                hideInitialState();
+                showResultCards();
+                renderAnswer('❌ 请求失败: ' + error.message);
+                renderSources([]);
+                renderLatency({
+                    total_ms: 0,
+                    retrieval_ms: 0,
+                    rerank_ms: 0,
+                    llm_ms: 0
+                });
+            } finally {
+                setLoading(false);
+            }
+        }
+        
+        // ============ 初始化 ============
+        
+        // 页面加载完成后执行
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('LocalRAG-CS 后台界面已加载');
+            
+            // 绑定回车键提交
+            elements.questionInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    submitQuestion();
+                }
+            });
+        });
+    </script>
+</body>
+</html>
