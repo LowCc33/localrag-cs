@@ -289,7 +289,7 @@ async def ask_stream_endpoint(
             yield _format_sse(config.SSE_EVENT_ERROR, {"message": f"检索失败: {str(e)}"})
             yield _format_sse(config.SSE_EVENT_DONE, {"status": "error"})
 
-        return StreamingResponse(_err_gen(), media_type="text/event-stream")
+        return StreamingResponse(_err_gen(), media_type="text/event-stream; charset=utf-8")
 
     # 检索为空：仍按 SSE 推一段固定提示，保证前端处理路径统一
     if not hybrid_results:
@@ -315,7 +315,7 @@ async def ask_stream_endpoint(
                 "reranked_count": 0,
             })
 
-        return StreamingResponse(_empty_gen(), media_type="text/event-stream")
+        return StreamingResponse(_empty_gen(), media_type="text/event-stream; charset=utf-8")
 
     # ---------- 重排 ----------
     rerank_start = time.perf_counter()
@@ -431,7 +431,7 @@ async def ask_stream_endpoint(
     # - X-Accel-Buffering: no    → 关闭 nginx 缓冲，保证逐 token 直达浏览器
     return StreamingResponse(
         event_generator(),
-        media_type="text/event-stream",
+        media_type="text/event-stream; charset=utf-8",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",

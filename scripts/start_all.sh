@@ -86,9 +86,9 @@ echo "【5/5】启动API服务..."
 cd "$PROJECT_ROOT"
 
 # 检查虚拟环境（优先使用localrag-cs的现成venv，其次项目内venv）
-if [ -d "/home/zbs/localrag-cs/venv" ]; then
-    echo "  使用 localrag-cs 的虚拟环境"
-    VENV_PYTHON="/home/zbs/localrag-cs/venv/bin/python"
+if [ -d "/home/zbs/localrag-cs1/venv" ]; then
+    echo "  使用 localrag-cs1 的虚拟环境"
+    VENV_PYTHON="/home/zbs/localrag-cs1/venv/bin/python"
 elif [ -d "venv" ]; then
     echo "  使用项目内虚拟环境 venv"
     VENV_PYTHON="$PROJECT_ROOT/venv/bin/python"
