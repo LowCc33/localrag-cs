@@ -160,3 +160,28 @@ LLM_SYSTEM_PROMPT = """你是一个专业的问答助手。请严格基于提供
 3. 回答要简洁、准确，使用中文
 4. 不要提及"根据上下文"之类的话，直接给出答案
 """
+
+# ========== Redis 热点缓存配置（任务：localrag-redis-cache） ==========
+# -----------------------------------------------------------------------------
+# 用户态 Redis 部署位置：~/redis/，由 scripts/start_redis.sh 启动
+# 缓存策略：完整答案缓存（query -> answer），命中直接返回，绕过检索+生成
+# 失效策略：TTL 24h + maxmemory-policy=allkeys-lru（redis.conf 中配置）
+# 降级保护：Redis 连接异常时自动跳过缓存，走原流程，不阻塞服务
+# -----------------------------------------------------------------------------
+# 缓存开关：True 启用 Redis 缓存，False 关闭（演示对比/排查问题时可关）
+CACHE_ENABLED = os.getenv('CACHE_ENABLED', 'true').lower() == 'true'
+# Redis 连接地址（用户态部署在本机，固定 127.0.0.1:6379）
+CACHE_REDIS_HOST = os.getenv('CACHE_REDIS_HOST', '127.0.0.1')
+CACHE_REDIS_PORT = int(os.getenv('CACHE_REDIS_PORT', 6379))
+# Redis 数据库编号（0~15，默认 0；与项目独占，避免和其它业务串扰）
+CACHE_REDIS_DB = int(os.getenv('CACHE_REDIS_DB', 0))
+# Redis 密码（用户态部署默认无密码，生产环境务必设置）
+CACHE_REDIS_PASSWORD = os.getenv('CACHE_REDIS_PASSWORD', None) or None
+# Redis 操作超时（秒）。100ms 足够本机访问，超时直接走降级
+CACHE_REDIS_TIMEOUT = float(os.getenv('CACHE_REDIS_TIMEOUT', 0.1))
+# 缓存 Key 前缀（统一命名空间，方便定位/清理）
+CACHE_KEY_PREFIX = 'localrag:cache:'
+# 缓存 TTL（秒），任务方案要求 24 小时
+CACHE_TTL_SECONDS = int(os.getenv('CACHE_TTL_SECONDS', 86400))
+# 单 session 统计 key（命中数/未命中数/总响应时间累计，用于 /api/cache/stats）
+CACHE_STATS_KEY = 'localrag:cache:stats'
