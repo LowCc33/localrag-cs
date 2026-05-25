@@ -50,7 +50,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from dependencies import initialize_clients, get_client_manager
 
 # 导入路由
-from routes import health, ask
+from routes import health, ask, cache as cache_route
 
 
 # ============== 应用生命周期管理 ==============
@@ -196,6 +196,9 @@ app.include_router(health.router)
 
 # 包含 ask 路由
 app.include_router(ask.router)
+
+# 包含 cache 管理路由（/api/cache/stats /api/cache/flush）
+app.include_router(cache_route.router)
 
 
 # ============== 页面路由 ==============
