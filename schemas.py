@@ -80,6 +80,17 @@ class AskResponse(BaseModel):
     reranked_count: int = Field(..., description="重排后的文档数量")
     status: str = Field(default="success", description="处理状态: success/error")
     error_message: Optional[str] = Field(None, description="错误信息（如有）")
+    # ===== 缓存相关字段（任务 localrag-redis-cache） =====
+    # HIT 表示走了 Redis 缓存毫秒级返回，MISS 表示完整链路
+    cache_status: Optional[str] = Field(
+        default=None, description="缓存命中状态：HIT / MISS / None（接口未接缓存时）"
+    )
+    response_time_ms: Optional[float] = Field(
+        default=None, description="端到端响应耗时（毫秒），用于前端徽章展示"
+    )
+    cached_at: Optional[str] = Field(
+        default=None, description="缓存写入时间，仅 HIT 时返回"
+    )
 
 
 class HealthCheckResponse(BaseModel):

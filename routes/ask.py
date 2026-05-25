@@ -35,6 +35,10 @@ from dependencies import (
 # 导入配置（流式相关常量统一从 config.py 取，禁止硬编码）
 import config
 
+# 导入缓存模块（任务 localrag-redis-cache 步骤B/C）
+# 设计原则：缓存层作为独立模块插入主流程，Redis 不可用时全部降级 None
+from core import cache as cache_service
+
 router = APIRouter(tags=["ask"])
 
 
@@ -72,6 +76,38 @@ async def ask_endpoint(
     total_start = time.perf_counter()
     
     try:
+        # ========== 阶段0: 查缓存（任务 localrag-redis-cache 接入点） ==========
+        # 命中直接返回，绕过检索 + 重排 + LLM 三阶段，毫秒级响应
+        # 未命中走原流程，并在最后写回缓存
+        cached = cache_service.get_cache(request.question)
+        if cached is not None:
+            total_ms = (time.perf_counter() - total_start) * 1000
+            # 复用 SourceDoc 反序列化（缓存里 sources 是 dict list）
+            cached_sources = []
+            for s in cached.get("sources", []):
+                try:
+                    cached_sources.append(SourceDoc(**s))
+                except Exception:
+                    # 老缓存字段不齐时跳过，保证主流程不挂
+                    continue
+            return AskResponse(
+                question=request.question,
+                answer=cached.get("answer", ""),
+                sources=cached_sources,
+                latency=LatencyStats(
+                    total_ms=round(total_ms, 2),
+                    retrieval_ms=0.0,
+                    rerank_ms=0.0,
+                    llm_ms=0.0,
+                ),
+                retrieved_count=len(cached_sources),
+                reranked_count=len(cached_sources),
+                status="success",
+                cache_status="HIT",
+                response_time_ms=round(total_ms, 2),
+                cached_at=cached.get("cached_at"),
+            )
+
         # ========== 阶段1: 混合检索 ==========
         retrieval_start = time.perf_counter()
         
@@ -100,7 +136,10 @@ async def ask_endpoint(
                 ),
                 retrieved_count=0,
                 reranked_count=0,
-                status="success"
+                status="success",
+                # 没检索到结果不算"标准答案"，按 MISS 计但不写缓存（避免污染）
+                cache_status="MISS",
+                response_time_ms=round(total_ms, 2),
             )
         
         # ========== 阶段2: 重排 ==========
@@ -182,7 +221,17 @@ async def ask_endpoint(
         # 如果答案包含"无法回答"或"抱歉"，清空引用文档
         if "无法回答" in answer or "抱歉" in answer:
             source_docs = []
-        
+
+        # ========== 写回缓存（MISS 主流程末尾） ==========
+        # 只在拿到了实际答案、且非"抱歉/无法回答"时写入，避免污染缓存
+        # set_cache 内部自带异常吞掉，写失败不影响返回
+        if answer and source_docs:
+            cache_service.set_cache(
+                query=request.question,
+                answer=answer,
+                sources=[s.model_dump() for s in source_docs],
+            )
+
         # ========== 组装响应 ==========
         return AskResponse(
             question=request.question,
@@ -196,7 +245,9 @@ async def ask_endpoint(
             ),
             retrieved_count=retrieved_count,
             reranked_count=reranked_count,
-            status="success"
+            status="success",
+            cache_status="MISS",
+            response_time_ms=round(total_ms, 2),
         )
         
     except HTTPException:
@@ -269,6 +320,44 @@ async def ask_stream_endpoint(
         raise HTTPException(status_code=404, detail="流式接口未启用")
 
     total_start = time.perf_counter()
+
+    # ---------- 阶段0：查缓存（命中直接整段吐出，绕过检索+重排+LLM） ----------
+    cached = cache_service.get_cache(request.question)
+    if cached is not None:
+        cached_answer = cached.get("answer", "")
+        cached_sources = cached.get("sources", [])
+        cached_at = cached.get("cached_at")
+        cache_total_ms = (time.perf_counter() - total_start) * 1000
+
+        async def _hit_gen():
+            # 命中时一次性把完整答案推下去，前端打字机感会变弱但符合"毫秒级响应"演示意图
+            yield _format_sse(config.SSE_EVENT_TOKEN, {"text": cached_answer})
+            yield _format_sse(config.SSE_EVENT_SOURCES, {"sources": cached_sources})
+            yield _format_sse(config.SSE_EVENT_LATENCY, {
+                "total_ms": round(cache_total_ms, 2),
+                "retrieval_ms": 0.0,
+                "rerank_ms": 0.0,
+                "llm_ms": 0.0,
+            })
+            yield _format_sse(config.SSE_EVENT_DONE, {
+                "status": "success",
+                "retrieved_count": len(cached_sources),
+                "reranked_count": len(cached_sources),
+                # 关键字段：前端徽章靠这两个决定 HIT/MISS 与响应时间显示
+                "cache_status": "HIT",
+                "response_time_ms": round(cache_total_ms, 2),
+                "cached_at": cached_at,
+            })
+
+        return StreamingResponse(
+            _hit_gen(),
+            media_type="text/event-stream; charset=utf-8",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     # ---------- 阶段1+阶段2：检索+重排（同步执行，与原接口一致）----------
     # 这里不能放进 generator 里 yield 前再算，否则首字延迟会被打破。
@@ -412,6 +501,15 @@ async def ask_stream_endpoint(
         else:
             final_sources = [s.model_dump() for s in source_docs]
 
+        # ---------- 写回缓存（MISS 流式版） ----------
+        # 只在拿到了实际答案且非"抱歉/无法回答"时写
+        if produced_any and final_sources:
+            cache_service.set_cache(
+                query=request.question,
+                answer=full_answer,
+                sources=final_sources,
+            )
+
         # 生成结束后，推 sources / latency / done 三个收尾事件
         yield _format_sse(config.SSE_EVENT_SOURCES, {"sources": final_sources})
         yield _format_sse(config.SSE_EVENT_LATENCY, {
@@ -424,6 +522,9 @@ async def ask_stream_endpoint(
             "status": "success" if produced_any else "empty",
             "retrieved_count": retrieved_count,
             "reranked_count": reranked_count,
+            # MISS 路径标记，前端按此渲染灰色徽章
+            "cache_status": "MISS",
+            "response_time_ms": round(total_ms, 2),
         })
 
     # 关键响应头：
