@@ -53,6 +53,51 @@
             font-family: 'Courier New', monospace;
             font-size: 0.875rem;
         }
+
+        /* ============ 缓存徽章样式（任务 localrag-redis-cache 步骤E） ============ */
+        /* HIT 绿色徽章 #52C41A，MISS 灰色 #BFBFBF，演示视频里一眼可见 */
+        .cache-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 9999px;
+            font-size: 0.85rem;
+            font-weight: 700;
+            letter-spacing: 0.3px;
+            color: #ffffff;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .cache-badge-hit {
+            background-color: #52C41A;
+        }
+        .cache-badge-miss {
+            background-color: #BFBFBF;
+        }
+        .cache-badge .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ffffff;
+            box-shadow: 0 0 0 2px rgba(255,255,255,0.4);
+        }
+
+        /* 缓存统计小卡（顶部条） */
+        .cache-stat-card {
+            background: linear-gradient(135deg, #ecfdf5 0%, #ecfeff 100%);
+            border: 1px solid #d1fae5;
+        }
+        .cache-stat-num {
+            font-size: 1.25rem;
+            font-weight: 700;
+            color: #047857;
+            line-height: 1;
+        }
+        .cache-stat-label {
+            font-size: 0.7rem;
+            color: #6b7280;
+            margin-top: 2px;
+        }
     </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
@@ -90,6 +135,45 @@
 
     <!-- 主内容区域 -->
     <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+        <!-- 缓存性能统计卡（顶部条，任务 localrag-redis-cache 步骤E） -->
+        <div id="cache-stat-bar" class="cache-stat-card rounded-xl px-5 py-3 mb-6 shadow-sm">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+                <div class="flex items-center gap-2">
+                    <span class="text-lg">⚡</span>
+                    <span class="font-semibold text-gray-800 text-sm">Redis 热点缓存性能</span>
+                    <span id="cache-availability" class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">检测中…</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-4 sm:gap-6">
+                    <div class="text-center">
+                        <div id="stat-total" class="cache-stat-num">0</div>
+                        <div class="cache-stat-label">总查询</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="stat-hit" class="cache-stat-num" style="color:#16a34a">0</div>
+                        <div class="cache-stat-label">HIT</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="stat-miss" class="cache-stat-num" style="color:#6b7280">0</div>
+                        <div class="cache-stat-label">MISS</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="stat-hitrate" class="cache-stat-num">0%</div>
+                        <div class="cache-stat-label">命中率</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="stat-avg-hit" class="cache-stat-num" style="color:#047857">- ms</div>
+                        <div class="cache-stat-label">HIT 平均</div>
+                    </div>
+                    <div class="text-center">
+                        <div id="stat-avg-miss" class="cache-stat-num" style="color:#6b7280">- ms</div>
+                        <div class="cache-stat-label">MISS 平均</div>
+                    </div>
+                    <button onclick="flushCacheAction()" class="text-xs px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50 transition-colors">
+                        清空缓存
+                    </button>
+                </div>
+            </div>
+        </div>
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
             <!-- 左侧：输入区域 -->
             <div class="space-y-6">
@@ -172,6 +256,8 @@
                                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
                             </svg>
                             最终答案
+                            <!-- 缓存徽章插槽（HIT/MISS + 响应时间，步骤E） -->
+                            <span id="cache-badge-slot" class="ml-auto"></span>
                         </h2>
                     </div>
                     <div class="p-6">
@@ -259,7 +345,15 @@
         // ============ 全局状态 ============
         const state = {
             isLoading: false,
-            apiBaseUrl: window.location.origin
+            apiBaseUrl: window.location.origin,
+            // ===== 缓存性能本地累计（任务步骤E） =====
+            // 本会话累计 HIT/MISS 平均响应时间，独立于后端 hit/miss 计数（后端是跨会话累计）
+            cacheLocal: {
+                hit: 0,
+                miss: 0,
+                hitMsSum: 0,
+                missMsSum: 0,
+            },
         };
 
         // ============ DOM 元素获取 ============
@@ -409,6 +503,98 @@
             elements.latencyRerank.textContent = Math.round(latency.rerank_ms || 0);
             elements.latencyLlm.textContent = Math.round(latency.llm_ms || 0);
         }
+
+        // ============ 缓存徽章 & 统计（步骤E） ============
+
+        // 渲染右上角 HIT/MISS 徽章
+        // status: 'HIT' | 'MISS' | null
+        // ms: 响应时间数值（毫秒），小于 1000 显示 ms，否则显示 s
+        function renderCacheBadge(status, ms) {
+            const slot = document.getElementById('cache-badge-slot');
+            if (!slot) return;
+            if (!status) { slot.innerHTML = ''; return; }
+            const isHit = status === 'HIT';
+            const cls = isHit ? 'cache-badge-hit' : 'cache-badge-miss';
+            const label = isHit ? 'HIT' : 'MISS';
+            // 格式化响应时间：<1000ms 用 ms，>=1000 用 s
+            let timeText = '';
+            if (typeof ms === 'number') {
+                timeText = ms < 1000
+                    ? `${Math.round(ms)}ms`
+                    : `${(ms / 1000).toFixed(2)}s`;
+            }
+            slot.innerHTML = `
+                <span class="cache-badge ${cls}">
+                    <span class="dot"></span>
+                    ${label}${timeText ? ' · ' + timeText : ''}
+                </span>
+            `;
+        }
+
+        // 本地累计当前会话的 HIT/MISS 平均响应时间
+        function accumulateLocalStats(status, ms) {
+            if (typeof ms !== 'number') return;
+            if (status === 'HIT') {
+                state.cacheLocal.hit += 1;
+                state.cacheLocal.hitMsSum += ms;
+            } else if (status === 'MISS') {
+                state.cacheLocal.miss += 1;
+                state.cacheLocal.missMsSum += ms;
+            }
+            const c = state.cacheLocal;
+            const avgHit = c.hit > 0 ? Math.round(c.hitMsSum / c.hit) : null;
+            const avgMiss = c.miss > 0 ? Math.round(c.missMsSum / c.miss) : null;
+            const avgHitEl = document.getElementById('stat-avg-hit');
+            const avgMissEl = document.getElementById('stat-avg-miss');
+            if (avgHitEl) avgHitEl.textContent = avgHit === null ? '- ms' : `${avgHit} ms`;
+            if (avgMissEl) avgMissEl.textContent = avgMiss === null ? '- ms' : `${avgMiss} ms`;
+        }
+
+        // 从 /api/cache/stats 拉服务端累计，刷新顶部统计条
+        async function refreshCacheStats() {
+            try {
+                const resp = await fetch(`${state.apiBaseUrl}/api/cache/stats`);
+                if (!resp.ok) throw new Error('stats接口异常');
+                const s = await resp.json();
+                document.getElementById('stat-total').textContent = s.total || 0;
+                document.getElementById('stat-hit').textContent = s.hit || 0;
+                document.getElementById('stat-miss').textContent = s.miss || 0;
+                document.getElementById('stat-hitrate').textContent = `${(s.hit_rate || 0).toFixed(1)}%`;
+                const avail = document.getElementById('cache-availability');
+                if (avail) {
+                    if (s.available) {
+                        avail.textContent = `Redis 在线 · ${s.cached_keys || 0} 条缓存`;
+                        avail.className = 'text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700';
+                    } else if (s.enabled) {
+                        avail.textContent = 'Redis 不可达（已降级）';
+                        avail.className = 'text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700';
+                    } else {
+                        avail.textContent = '缓存已关闭';
+                        avail.className = 'text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600';
+                    }
+                }
+            } catch (e) {
+                // 拉失败就静默，别打扰用户
+                console.warn('刷新缓存统计失败:', e);
+            }
+        }
+
+        // 一键清空缓存（按钮事件）
+        async function flushCacheAction() {
+            if (!confirm('确认清空 LocalRAG 缓存？此操作仅清空本项目的缓存键，不影响其它数据。')) return;
+            try {
+                const resp = await fetch(`${state.apiBaseUrl}/api/cache/flush`, { method: 'POST' });
+                const data = await resp.json();
+                alert(`已清空 ${data.flushed || 0} 条缓存`);
+                // 重置本地会话统计
+                state.cacheLocal = { hit: 0, miss: 0, hitMsSum: 0, missMsSum: 0 };
+                document.getElementById('stat-avg-hit').textContent = '- ms';
+                document.getElementById('stat-avg-miss').textContent = '- ms';
+                refreshCacheStats();
+            } catch (e) {
+                alert('清空失败: ' + e.message);
+            }
+        }
         
         // HTML转义，防止XSS攻击
         function escapeHtml(text) {
@@ -445,6 +631,8 @@
             clearAnswer();
             renderSources([]);
             renderLatency({total_ms: 0, retrieval_ms: 0, rerank_ms: 0, llm_ms: 0});
+            // 每次新请求都清掉徽章，避免上次的状态残留
+            renderCacheBadge(null);
 
             const requestBody = {
                 question: question,
@@ -537,7 +725,13 @@
                     renderLatency(data);
                     break;
                 case 'done':
-                    // 结束信号，无需特殊处理
+                    // 结束信号：done 事件里带 cache_status 和 response_time_ms（步骤E）
+                    if (data && data.cache_status) {
+                        renderCacheBadge(data.cache_status, data.response_time_ms);
+                        accumulateLocalStats(data.cache_status, data.response_time_ms);
+                        // 触发顶部统计条刷新（拉服务端累计）
+                        refreshCacheStats();
+                    }
                     break;
                 case 'error':
                     appendAnswer('\n\n❌ ' + (data.message || '生成异常'));
@@ -562,6 +756,12 @@
             renderAnswer(data.answer);
             renderSources(data.sources);
             renderLatency(data.latency);
+            // 非流式降级路径也要把徽章渲染出来（任务步骤E）
+            if (data.cache_status) {
+                renderCacheBadge(data.cache_status, data.response_time_ms);
+                accumulateLocalStats(data.cache_status, data.response_time_ms);
+                refreshCacheStats();
+            }
         }
         
         // ============ 初始化 ============
@@ -577,6 +777,10 @@
                     submitQuestion();
                 }
             });
+
+            // 首屏拉一次缓存统计，并每 15 秒自动刷新（演示中能看到数字变化）
+            refreshCacheStats();
+            setInterval(refreshCacheStats, 15000);
         });
     </script>
 </body>
