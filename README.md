@@ -336,3 +336,78 @@ curl -X POST http://localhost:8000/api/ask \
 - 🎉 标准目录结构整理，支持一键部署
 - ✅ 完整的RAG链路实现
 - ✅ 支持多级优雅降级
+
+---
+
+## ⚡ Redis 热点查询缓存（新增）
+
+### 功能简介
+对高频查询做完整答案缓存，命中时**毫秒级返回**（实测 < 1ms），跳过检索 + 重排 + LLM 三阶段。
+Redis 不可用时自动降级到无缓存模式，**不影响主链路**。
+
+### 用户态部署（不依赖系统服务，无需 sudo）
+Redis 编译安装在 `~/redis/` 下，由项目内脚本启停。
+
+```bash
+# 启动 Redis（幂等，已启动会跳过）
+bash scripts/start_redis.sh
+
+# 验证（应返回 PONG）
+~/redis/bin/redis-cli ping
+
+# 优雅停止
+bash scripts/stop_redis.sh
+```
+
+> 首次部署需要手动编译一次：
+> ```bash
+> mkdir -p ~/build && cd ~/build
+> wget https://download.redis.io/releases/redis-7.2.4.tar.gz
+> tar xzf redis-7.2.4.tar.gz && cd redis-7.2.4 && make -j$(nproc) MALLOC=libc
+> mkdir -p ~/redis/bin && cp src/redis-server src/redis-cli ~/redis/bin/
+> # 配置 ~/redis/etc/redis.conf 参考仓库内 redis.conf 示例
+> ```
+
+### 安装 Python 依赖
+
+```bash
+cd ~/localrag-cs1 && source venv/bin/activate
+pip install redis
+```
+
+### 关键设计
+| 维度 | 设计 |
+|------|------|
+| 缓存粒度 | 完整答案（query → answer + sources） |
+| Key 归一化 | 去中英文标点 + 去所有空白 + 转小写 + md5 |
+| TTL | 24 小时（`config.CACHE_TTL_SECONDS`） |
+| 内存上限 | 256MB + `allkeys-lru` 淘汰（redis.conf） |
+| 降级保护 | Redis 异常静默降级，返回 None/False，不阻塞业务 |
+| 命名空间 | 所有 key 走 `localrag:cache:` 前缀，flush 不会误伤其他业务 |
+
+### 接口
+
+| Method | Path | 说明 |
+|--------|------|------|
+| GET | `/api/cache/stats` | 返回 hit/miss/命中率/已缓存条数等运行时统计 |
+| POST | `/api/cache/flush` | 清空本项目命名空间缓存 + 重置 HIT/MISS 计数 |
+
+`/api/ask` 与 `/api/ask/stream` 响应里新增字段：
+- `cache_status`：`HIT` / `MISS`
+- `response_time_ms`：端到端响应耗时
+- `cached_at`：缓存写入时间（仅 HIT 时返回）
+
+### 演示界面
+- 答案卡右上角：**HIT 绿色徽章** / **MISS 灰色徽章**，带响应时间
+- 页面顶部：实时统计条（总查询 / HIT / MISS / 命中率 / HIT 平均耗时 / MISS 平均耗时）
+- 每 15 秒自动刷新；带"清空缓存"按钮便于演示从零开始
+
+### 配置项（`config.py`）
+| 常量 | 默认 | 说明 |
+|------|------|------|
+| `CACHE_ENABLED` | `True` | 缓存总开关（环境变量同名可覆盖） |
+| `CACHE_REDIS_HOST` | `127.0.0.1` | Redis 地址 |
+| `CACHE_REDIS_PORT` | `6379` | Redis 端口 |
+| `CACHE_REDIS_TIMEOUT` | `0.1`(s) | 操作超时，超时立即降级 |
+| `CACHE_TTL_SECONDS` | `86400` | 缓存 TTL，24 小时 |
+| `CACHE_KEY_PREFIX` | `localrag:cache:` | Key 命名空间前缀 |
