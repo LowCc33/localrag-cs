@@ -232,6 +232,13 @@ class LLMClient:
             ) as response:
                 response.raise_for_status()
 
+                # 修复中文乱码（mojibake）关键点：
+                # llama.cpp 的 SSE 响应头通常不带 charset，requests 会 fallback
+                # 到 ISO-8859-1 去 decode UTF-8 字节流，导致中文变成 "ä¸­æ–‡"。
+                # 这里强制把响应编码改成 utf-8，让 iter_lines(decode_unicode=True)
+                # 按正确字符集解码。
+                response.encoding = "utf-8"
+
                 # 按行迭代 SSE 数据流；llama.cpp 的格式遵循 OpenAI:
                 #   data: {"choices":[{"delta":{"content":"你"}}]}
                 #   data: [DONE]
