@@ -808,6 +808,8 @@
                         // 触发顶部统计条刷新（拉服务端累计）
                         refreshCacheStats();
                     }
+                    // 刷新会话列表（新会话创建或标题更新）
+                    loadSessions();
                     break;
                 case 'error':
                     appendAnswer('\n\n❌ ' + (data.message || '生成异常'));
