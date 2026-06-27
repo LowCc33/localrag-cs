@@ -364,7 +364,9 @@ class TaskManager:
     
     def get_documents_list(self, limit: int = 100, offset: int = 0) -> Dict[str, Any]:
         """
-        获取已导入的文档列表（简化版，实际应从ES查询）
+        获取已导入的文档列表
+        
+        从ES查询文档列表，按source_file去重聚合。
         
         Args:
             limit: 返回数量限制
@@ -373,49 +375,173 @@ class TaskManager:
         Returns:
             文档列表信息
         """
-        # TODO: 实际应从ES查询文档列表
-        # 这里返回模拟数据
-        return {
-            "total": 0,
-            "documents": [],
-            "limit": limit,
-            "offset": offset
-        }
+        try:
+            es = self._get_es_client()
+            index_name = config.ES_INDEX_NAME
+            
+            if not es.index_exists(index_name):
+                return {"total": 0, "documents": [], "limit": limit, "offset": offset}
+            
+            # 按source_file聚合，获取每个文件的首条记录和chunk数
+            agg_resp = es.client.search(
+                index=index_name,
+                body={
+                    "size": 0,
+                    "aggs": {
+                        "by_source": {
+                            "terms": {
+                                "field": "source_file.keyword",
+                                "size": 10000,
+                                "order": {"max_create_time": "desc"}
+                            },
+                            "aggs": {
+                                "max_create_time": {
+                                    "max": {"field": "create_time"}
+                                },
+                                "top_hit": {
+                                    "top_hits": {
+                                        "size": 1,
+                                        "_source": ["doc_id", "question", "source_file", "category", "create_time"]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+            
+            buckets = agg_resp.get('aggregations', {}).get('by_source', {}).get('buckets', [])
+            total = len(buckets)
+            
+            # 分页
+            page_buckets = buckets[offset:offset + limit]
+            
+            documents = []
+            for bucket in page_buckets:
+                source_file = bucket.get('key', '')
+                chunks_count = bucket.get('doc_count', 0)
+                top_hit = bucket.get('top_hit', {}).get('hits', {}).get('hits', [])
+                
+                doc_id = ''
+                title = source_file
+                import_time = ''
+                
+                if top_hit:
+                    src = top_hit[0].get('_source', {})
+                    doc_id = src.get('doc_id', '')
+                    title = src.get('question', '') or src.get('source_file', '') or source_file
+                    import_time = src.get('create_time', '')
+                
+                # 文件类型
+                ext = Path(source_file).suffix.lower().lstrip('.')
+                file_type = ext if ext else 'unknown'
+                
+                documents.append({
+                    "doc_id": doc_id,
+                    "title": title,
+                    "file_type": file_type,
+                    "chunks": chunks_count,
+                    "import_time": import_time
+                })
+            
+            logger.info(f"文档列表查询: 共{total}个文件，返回{len(documents)}条")
+            
+            return {
+                "total": total,
+                "documents": documents,
+                "limit": limit,
+                "offset": offset
+            }
+            
+        except Exception as e:
+            logger.error(f"获取文档列表失败: {e}")
+            return {
+                "total": 0,
+                "documents": [],
+                "limit": limit,
+                "offset": offset
+            }
     
     def get_global_stats(self) -> Dict[str, Any]:
         """
         获取全局统计信息
         
+        从ES查询真实统计数据。
+        
         Returns:
             全局统计信息字典
         """
         try:
-            # 这里应该从ES和Redis聚合真实数据
-            # 暂时返回模拟数据
-            import random
+            es = self._get_es_client()
+            index_name = config.ES_INDEX_NAME
+            
+            if not es.index_exists(index_name):
+                return self._empty_stats()
+            
+            # 总文档数（按source_file去重）
+            agg_docs = es.client.search(
+                index=index_name,
+                body={
+                    "size": 0,
+                    "aggs": {
+                        "by_source": {
+                            "cardinality": {"field": "source_file.keyword"}
+                        }
+                    }
+                }
+            )
+            total_documents = agg_docs.get('aggregations', {}).get('by_source', {}).get('value', 0)
+            
+            # 总chunks数
+            count_resp = es.client.count(index=index_name)
+            total_chunks = count_resp.get('count', 0)
+            
+            # 最近导入时间
+            recent_resp = es.client.search(
+                index=index_name,
+                body={
+                    "size": 1,
+                    "sort": [{"create_time": {"order": "desc"}}],
+                    "_source": ["create_time"]
+                }
+            )
+            recent_hits = recent_resp.get('hits', {}).get('hits', [])
+            last_import_time = None
+            if recent_hits:
+                last_import_time = recent_hits[0].get('_source', {}).get('create_time')
+            
+            # 存储空间估算（每个chunk约2KB文本 + 4KB向量 ≈ 6KB）
+            storage_used_mb = total_chunks * 6.0 / 1024.0
+            
+            # 24小时内的任务统计
             from datetime import datetime, timedelta
-            
-            # 模拟数据
-            total_documents = random.randint(1000, 5000)
-            total_chunks = total_documents * random.randint(10, 50)
-            total_tokens = total_chunks * random.randint(100, 500)
-            
-            # 计算24小时内的任务统计
             now = datetime.now()
-            active_tasks = len(self.active_tasks)
-            completed_tasks_24h = random.randint(20, 100)
-            failed_tasks_24h = random.randint(0, 5)
+            cutoff = (now - timedelta(hours=24)).isoformat()
+            
+            completed_tasks_24h = 0
+            failed_tasks_24h = 0
+            # 从Redis获取所有任务状态（如果有）
+            try:
+                all_tasks = self.redis_client.get_all_task_statuses() if hasattr(self.redis_client, 'get_all_task_statuses') else {}
+                for task in all_tasks.values():
+                    if task.get('start_time', '') >= cutoff:
+                        if task.get('status') == 'completed':
+                            completed_tasks_24h += 1
+                        elif task.get('status') == 'failed':
+                            failed_tasks_24h += 1
+            except Exception:
+                pass
             
             stats = {
                 "total_documents": total_documents,
                 "total_chunks": total_chunks,
-                "total_tokens": total_tokens,
-                "storage_used_mb": total_chunks * 0.01,  # 假设每个chunk 0.01MB
-                "last_import_time": (now - timedelta(minutes=random.randint(1, 60))).isoformat(),
-                "active_tasks": active_tasks,
+                "total_tokens": total_chunks * 200,  # 估算：每个chunk约200 token
+                "storage_used_mb": round(storage_used_mb, 2),
+                "last_import_time": last_import_time,
+                "active_tasks": len(self.active_tasks),
                 "completed_tasks_24h": completed_tasks_24h,
                 "failed_tasks_24h": failed_tasks_24h,
-                "avg_processing_time_sec": random.uniform(5.0, 15.0)
+                "avg_processing_time_sec": round(self._calc_avg_processing_time(), 2)
             }
             
             logger.debug(f"全局统计: {stats}")
@@ -423,22 +549,13 @@ class TaskManager:
             
         except Exception as e:
             logger.error(f"获取全局统计失败: {e}")
-            # 返回空统计
-            return {
-                "total_documents": 0,
-                "total_chunks": 0,
-                "total_tokens": 0,
-                "storage_used_mb": 0.0,
-                "last_import_time": None,
-                "active_tasks": len(self.active_tasks),
-                "completed_tasks_24h": 0,
-                "failed_tasks_24h": 0,
-                "avg_processing_time_sec": 0.0
-            }
+            return self._empty_stats()
     
     def delete_document(self, doc_id: str) -> Dict[str, Any]:
         """
         删除文档及其所有chunks
+        
+        通过ES按doc_id删除所有匹配的文档。
         
         Args:
             doc_id: 文档ID
@@ -449,21 +566,76 @@ class TaskManager:
         try:
             logger.info(f"正在删除文档: {doc_id}")
             
-            # TODO: 实际应从ES删除文档和所有相关chunks
-            # 这里模拟删除操作
-            import random
+            es = self._get_es_client()
+            index_name = config.ES_INDEX_NAME
             
-            # 模拟删除的chunk数量
-            deleted_chunks = random.randint(1, 100)
+            if not es.index_exists(index_name):
+                return {
+                    "success": False,
+                    "message": f"索引 {index_name} 不存在",
+                    "deleted_doc_id": doc_id,
+                    "deleted_chunks": 0
+                }
+            
+            # 按doc_id删除
+            # 先查询匹配的文档数
+            count_resp = es.client.count(
+                index=index_name,
+                body={
+                    "query": {
+                        "term": {"doc_id.keyword": doc_id}
+                    }
+                }
+            )
+            match_count = count_resp.get('count', 0)
+            
+            if match_count == 0:
+                # 尝试按source_file前缀匹配（doc_id格式：文件名_索引）
+                count_resp = es.client.count(
+                    index=index_name,
+                    body={
+                        "query": {
+                            "wildcard": {"doc_id.keyword": f"{doc_id}_*"}
+                        }
+                    }
+                )
+                match_count = count_resp.get('count', 0)
+            
+            if match_count == 0:
+                logger.warning(f"未找到匹配的文档: {doc_id}")
+                return {
+                    "success": False,
+                    "message": f"未找到文档: {doc_id}",
+                    "deleted_doc_id": doc_id,
+                    "deleted_chunks": 0
+                }
+            
+            # 执行删除
+            delete_resp = es.client.delete_by_query(
+                index=index_name,
+                body={
+                    "query": {
+                        "bool": {
+                            "should": [
+                                {"term": {"doc_id.keyword": doc_id}},
+                                {"wildcard": {"doc_id.keyword": f"{doc_id}_*"}}
+                            ]
+                        }
+                    }
+                },
+                refresh=True
+            )
+            
+            deleted = delete_resp.get('deleted', 0)
             
             result = {
                 "success": True,
                 "message": f"文档 {doc_id} 删除成功",
                 "deleted_doc_id": doc_id,
-                "deleted_chunks": deleted_chunks
+                "deleted_chunks": deleted
             }
             
-            logger.info(f"文档删除成功: {doc_id}, 删除chunks: {deleted_chunks}")
+            logger.info(f"文档删除成功: {doc_id}, 删除chunks: {deleted}")
             return result
             
         except Exception as e:
@@ -636,6 +808,57 @@ class TaskManager:
         
         logger.info(f"🧹 清理了 {cleaned} 个已完成的任务")
         return cleaned
+    
+    def _get_es_client(self):
+        """
+        获取或创建ES客户端
+        
+        Returns:
+            ElasticsearchClient 实例
+        """
+        if not hasattr(self, '_es_client') or self._es_client is None:
+            from core.es_client import ElasticsearchClient
+            self._es_client = ElasticsearchClient()
+        return self._es_client
+    
+    def _empty_stats(self) -> Dict[str, Any]:
+        """返回空的统计信息"""
+        return {
+            "total_documents": 0,
+            "total_chunks": 0,
+            "total_tokens": 0,
+            "storage_used_mb": 0.0,
+            "last_import_time": None,
+            "active_tasks": len(self.active_tasks),
+            "completed_tasks_24h": 0,
+            "failed_tasks_24h": 0,
+            "avg_processing_time_sec": 0.0
+        }
+    
+    def _calc_avg_processing_time(self) -> float:
+        """
+        计算平均处理时间
+        
+        Returns:
+            平均处理时间（秒）
+        """
+        times = []
+        try:
+            all_tasks = self.redis_client.get_all_task_statuses() if hasattr(self.redis_client, 'get_all_task_statuses') else {}
+            for task in all_tasks.values():
+                if task.get('start_time') and task.get('end_time'):
+                    try:
+                        start = datetime.fromisoformat(task['start_time'])
+                        end = datetime.fromisoformat(task['end_time'])
+                        times.append((end - start).total_seconds())
+                    except (ValueError, TypeError):
+                        pass
+        except Exception:
+            pass
+        
+        if not times:
+            return 0.0
+        return sum(times) / len(times)
     
     def shutdown(self):
         """关闭任务管理器，清理资源"""
