@@ -158,7 +158,9 @@ class ElasticsearchClient(VectorSearchMixin, HybridSearchMixin):
     
     def get_document(self, index_name: str, doc_id: str) -> Optional[Dict[str, Any]]:
         try:
-            response = self.client.get(index=index_name, id=doc_id)
+            # ES 8+ 默认从 _source 中排除 dense_vector 字段以节省存储
+            # 使用 _source_includes=* 确保返回所有字段（包括embedding）
+            response = self.client.get(index=index_name, id=doc_id, _source_includes='*')
             return {
                 '_id': response.get('_id'),
                 '_index': response.get('_index'),

@@ -49,6 +49,32 @@ class BaseParser(ABC):
             
         Returns:
             解析出的纯文本内容，解析失败返回None
+        """
+        pass
+    
+    def extract_title(self, file_path: Path, content: Optional[str] = None) -> str:
+        """
+        提取文档标题
+        
+        默认使用文件名（不含扩展名）作为标题。
+        子类可覆盖此方法以提取更准确的标题（如 Markdown 的第一个 # 标题）。
+        
+        Args:
+            file_path: 文件路径对象
+            content: 已解析的文本内容（可选，部分解析器需要从内容中提取标题）
+            
+        Returns:
+            文档标题字符串
+        """
+        return file_path.stem
+        """
+        解析文件内容
+        
+        Args:
+            file_path: 文件路径对象
+            
+        Returns:
+            解析出的纯文本内容，解析失败返回None
             
         Raises:
             不抛出异常，解析失败返回None并记录日志
@@ -114,6 +140,27 @@ class MarkdownParser(BaseParser):
     def __init__(self):
         super().__init__()
         self.supported_extensions = ['.md', '.markdown']
+    
+    def extract_title(self, file_path: Path, content: Optional[str] = None) -> str:
+        """
+        从 Markdown 内容中提取第一个 # 标题
+        
+        如果找不到 # 标题，回退到文件名。
+        
+        Args:
+            file_path: 文件路径对象
+            content: 已解析的 Markdown 文本内容
+            
+        Returns:
+            文档标题
+        """
+        if content:
+            # 匹配第一个 # 标题（支持 ## 和 ### 等，但取第一个 # 开头的行）
+            match = re.search(r'^#\s+(.+)$', content, re.MULTILINE)
+            if match:
+                return match.group(1).strip()
+        # 回退到文件名
+        return file_path.stem
     
     def parse(self, file_path: Path) -> Optional[str]:
         """
@@ -468,6 +515,261 @@ class DocxParser(BaseParser):
             return False
 
 
+class CSVParser(BaseParser):
+    """CSV文件解析器"""
+    
+    def __init__(self):
+        super().__init__()
+        self.supported_extensions = ['.csv']
+        import csv
+        self._csv_available = True
+    
+    def parse(self, file_path: Path) -> Optional[str]:
+        """
+        解析CSV文件
+        
+        Args:
+            file_path: CSV文件路径
+            
+        Returns:
+            CSV文本内容，解析失败返回None
+        """
+        try:
+            import csv
+            
+            content_parts = []
+            encodings = ['utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'latin-1']
+            
+            for encoding in encodings:
+                try:
+                    with open(file_path, 'r', encoding=encoding) as f:
+                        csv_reader = csv.reader(f)
+                        content_parts = []
+                        for row_num, row in enumerate(csv_reader, 1):
+                            if row:
+                                row_text = ' | '.join(str(cell).strip() for cell in row if str(cell).strip())
+                                if row_text:
+                                    content_parts.append(row_text)
+                            if row_num % 100 == 0:
+                                logger.debug(f"CSV解析进度: {row_num}行")
+                    break  # 成功解析，退出编码循环
+                except UnicodeDecodeError:
+                    continue
+            
+            if not content_parts:
+                logger.warning(f"CSV文件无文本内容: {file_path.name}")
+                return None
+            
+            full_content = '\n'.join(content_parts)
+            logger.info(f"CSV解析完成: {file_path.name}，字符数: {len(full_content)}")
+            return full_content
+        except ImportError:
+            logger.error("csv模块不可用，无法解析CSV文件")
+            return None
+        except Exception as e:
+            logger.error(f"解析CSV文件失败 {file_path.name}: {e}")
+            return None
+
+
+class HTMLParser(BaseParser):
+    """HTML文件解析器"""
+    
+    def __init__(self):
+        super().__init__()
+        self.supported_extensions = ['.html', '.htm']
+        try:
+            from bs4 import BeautifulSoup
+            self._has_bs4 = True
+        except ImportError:
+            self._has_bs4 = False
+            logger.warning("bs4未安装，HTML解析将使用纯文本降级模式")
+    
+    def parse(self, file_path: Path) -> Optional[str]:
+        """
+        解析HTML文件
+        
+        Args:
+            file_path: HTML文件路径
+            
+        Returns:
+            纯文本内容，解析失败返回None
+        """
+        try:
+            encodings = ['utf-8', 'utf-8-sig', 'gbk', 'gb2312', 'latin-1']
+            raw_bytes = file_path.read_bytes()
+            
+            for encoding in encodings:
+                try:
+                    html_content = raw_bytes.decode(encoding)
+                    break
+                except UnicodeDecodeError:
+                    continue
+            else:
+                logger.error(f"无法解码HTML文件: {file_path.name}")
+                return None
+            
+            if self._has_bs4:
+                from bs4 import BeautifulSoup
+                soup = BeautifulSoup(html_content, 'html.parser')
+                # 移除脚本和样式
+                for tag in soup(['script', 'style', 'noscript', 'iframe']):
+                    tag.decompose()
+                text = soup.get_text(separator='\n', strip=True)
+            else:
+                # 降级：用正则去除HTML标签
+                import re
+                text = re.sub(r'<script[^>]*>.*?</script>', '', html_content, flags=re.DOTALL | re.IGNORECASE)
+                text = re.sub(r'<style[^>]*>.*?</style>', '', text, flags=re.DOTALL | re.IGNORECASE)
+                text = re.sub(r'<[^>]+>', ' ', text)
+                text = re.sub(r'\s+', ' ', text).strip()
+            
+            if not text or len(text.strip()) < 10:
+                logger.warning(f"HTML文件无有效文本: {file_path.name}")
+                return None
+            
+            logger.info(f"HTML解析完成: {file_path.name}，字符数: {len(text)}")
+            return text
+        except Exception as e:
+            logger.error(f"解析HTML文件失败 {file_path.name}: {e}")
+            return None
+
+
+class XlsxParser(BaseParser):
+    """XLSX文件解析器（Excel）"""
+    
+    def __init__(self):
+        super().__init__()
+        self.supported_extensions = ['.xlsx', '.xls']
+        try:
+            import openpyxl
+            self._has_openpyxl = True
+        except ImportError:
+            self._has_openpyxl = False
+            logger.warning("openpyxl未安装，XLSX解析将使用ZIP降级模式")
+    
+    def parse(self, file_path: Path) -> Optional[str]:
+        """
+        解析XLSX文件
+        
+        Args:
+            file_path: XLSX文件路径
+            
+        Returns:
+            文本内容，解析失败返回None
+        """
+        try:
+            content_parts = []
+            
+            if self._has_openpyxl:
+                import openpyxl
+                wb = openpyxl.load_workbook(file_path, read_only=True, data_only=True)
+                for sheet_name in wb.sheetnames:
+                    sheet = wb[sheet_name]
+                    content_parts.append(f"工作表: {sheet_name}\n")
+                    for row in sheet.iter_rows(values_only=True):
+                        if any(str(cell).strip() for cell in row if cell is not None):
+                            row_text = ' | '.join(str(cell).strip() for cell in row if cell is not None and str(cell).strip())
+                            if row_text:
+                                content_parts.append(row_text)
+                wb.close()
+            else:
+                # 降级：ZIP方式读取sharedStrings.xml
+                import zipfile
+                import xml.etree.ElementTree as ET
+                with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                    if 'xl/sharedStrings.xml' in zip_ref.namelist():
+                        with zip_ref.open('xl/sharedStrings.xml') as f:
+                            tree = ET.parse(f)
+                            root = tree.getroot()
+                            ns = {'ns': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+                            for si in root.findall('.//ns:si', ns):
+                                t = si.find('.//ns:t', ns)
+                                if t is not None and t.text and t.text.strip():
+                                    content_parts.append(t.text.strip())
+            
+            if not content_parts:
+                logger.warning(f"XLSX文件无有效文本: {file_path.name}")
+                return None
+            
+            full_content = '\n'.join(content_parts)
+            logger.info(f"XLSX解析完成: {file_path.name}，字符数: {len(full_content)}")
+            return full_content
+        except Exception as e:
+            logger.error(f"解析XLSX文件失败 {file_path.name}: {e}")
+            return None
+
+
+class PptxParser(BaseParser):
+    """PPTX文件解析器（PowerPoint）"""
+    
+    def __init__(self):
+        super().__init__()
+        self.supported_extensions = ['.pptx', '.ppt']
+        try:
+            import pptx
+            self._has_pptx = True
+        except ImportError:
+            self._has_pptx = False
+            logger.warning("python-pptx未安装，PPTX解析将使用ZIP降级模式")
+    
+    def parse(self, file_path: Path) -> Optional[str]:
+        """
+        解析PPTX文件
+        
+        Args:
+            file_path: PPTX文件路径
+            
+        Returns:
+            文本内容，解析失败返回None
+        """
+        try:
+            content_parts = []
+            
+            if self._has_pptx:
+                import pptx
+                prs = pptx.Presentation(file_path)
+                for slide_num, slide in enumerate(prs.slides, 1):
+                    slide_text = []
+                    for shape in slide.shapes:
+                        if hasattr(shape, 'text') and shape.text.strip():
+                            slide_text.append(shape.text.strip())
+                    if slide_text:
+                        content_parts.append(f"第{slide_num}页:")
+                        content_parts.extend(slide_text)
+            else:
+                # 降级：ZIP方式读取slide*.xml
+                import zipfile
+                import xml.etree.ElementTree as ET
+                ns = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'}
+                with zipfile.ZipFile(file_path, 'r') as zip_ref:
+                    slide_files = sorted(f for f in zip_ref.namelist() if 'ppt/slides/slide' in f and f.endswith('.xml'))
+                    for slide_num, slide_file in enumerate(slide_files, 1):
+                        try:
+                            with zip_ref.open(slide_file) as f:
+                                tree = ET.parse(f)
+                                root = tree.getroot()
+                                texts = []
+                                for t in root.findall('.//a:t', ns):
+                                    if t.text and t.text.strip():
+                                        texts.append(t.text.strip())
+                                if texts:
+                                    content_parts.append(f"第{slide_num}页:")
+                                    content_parts.extend(texts)
+                        except Exception:
+                            continue
+            
+            if not content_parts:
+                logger.warning(f"PPTX文件无有效文本: {file_path.name}")
+                return None
+            
+            full_content = '\n'.join(content_parts)
+            logger.info(f"PPTX解析完成: {file_path.name}，字符数: {len(full_content)}")
+            return full_content
+        except Exception as e:
+            logger.error(f"解析PPTX文件失败 {file_path.name}: {e}")
+            return None
+
+
 class ParserFactory:
     """解析器工厂类"""
     
@@ -481,13 +783,15 @@ class ParserFactory:
                 TextParser(),
                 MarkdownParser(),
                 PDFParser(),
-                DocxParser()
+                DocxParser(),
+                CSVParser(),
+                HTMLParser(),
+                XlsxParser(),
+                PptxParser()
             ]
-            # 过滤掉不可用的解析器
-            cls._parsers = [p for p in cls._parsers 
-                           if (hasattr(p, '_has_pypdf2') and p._has_pypdf2) or 
-                              (hasattr(p, '_has_docx') and p._has_docx) or 
-                              (not hasattr(p, '_has_pypdf2') and not hasattr(p, '_has_docx'))]
+            # 所有解析器都保留（带降级逻辑，无依赖时也能工作）
+            # 只过滤掉真正无法工作的解析器（通常不需要）
+            pass
         return cls._parsers
     
     @classmethod
@@ -505,6 +809,23 @@ class ParserFactory:
             if parser.can_parse(file_path):
                 return parser
         return None
+    
+    @classmethod
+    def extract_title(cls, file_path: Path, content: Optional[str] = None) -> str:
+        """
+        提取文档标题
+        
+        Args:
+            file_path: 文件路径对象
+            content: 已解析的文本内容（可选）
+            
+        Returns:
+            文档标题
+        """
+        parser = cls.get_parser_for_file(file_path)
+        if parser and hasattr(parser, 'extract_title'):
+            return parser.extract_title(file_path, content)
+        return file_path.stem
     
     @classmethod
     def parse_file(cls, file_path: Path) -> Optional[str]:

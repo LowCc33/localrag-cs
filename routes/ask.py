@@ -185,14 +185,23 @@ async def ask_endpoint(
         # 构建上下文文档
         context_docs = []
         source_docs = []
+        seen_doc_ids = set()  # 去重，避免同一个文档多次返回
         
         for doc, rerank_score in top_k_docs:
+            doc_id = doc.get('doc_id', '')
+            # 去重：同一个 doc_id 只保留第一次出现（重排分数最高）
+            if doc_id and doc_id in seen_doc_ids:
+                continue
+            seen_doc_ids.add(doc_id)
+            
             # 构建SourceDoc（字段对应HybridRetriever返回的格式）
+            # question 字段现在存的是真正的文档标题（新导入的数据），
+            # 旧数据可能还是 chunk[:200] 的遗留值，但展示时 title 用 question 字段
             source_doc = SourceDoc(
                 doc_id=doc.get('doc_id', ''),
-                title=doc.get('question', ''),  # question 字段作为标题
-                content=doc.get('answer', '')[:500],  # answer 字段作为内容
-                source_file=doc.get('category', ''),  # category 临时作为来源标识
+                title=doc.get('question', ''),  # 文档标题（新导入数据由解析器提取）
+                content=doc.get('answer', '')[:500],  # answer字段作为内容
+                source_file=doc.get('source_file') or doc.get('category', ''),
                 es_score=doc.get('bm25_score', doc.get('score', 0.0)),  # BM25原始分数
                 vector_score=doc.get('vector_score', 0.0),  # 向量模型原始分数
                 bm25_score=doc.get('bm25_score', doc.get('score', 0.0)),  # BM25原始分数（别名）
@@ -201,7 +210,7 @@ async def ask_endpoint(
             )
             source_docs.append(source_doc)
             
-            # 构建上下文字符串
+            # 构建上下文字符串（LLM上下文里也带上标题）
             context_docs.append(
                 f"【文档: {doc.get('question', '未知标题')}】\n"
                 f"{doc.get('answer', '')}"
@@ -438,12 +447,19 @@ async def ask_stream_endpoint(
     # 准备上下文 & 源文档（先构造好，便于流结束时一次性下发 sources）
     context_docs = []
     source_docs = []
+    seen_doc_ids = set()  # 去重，避免同一个文档多次返回
     for doc, rerank_score in top_k_docs:
+        doc_id = doc.get('doc_id', '')
+        # 去重：同一个 doc_id 只保留第一次出现（重排分数最高）
+        if doc_id and doc_id in seen_doc_ids:
+            continue
+        seen_doc_ids.add(doc_id)
+        
         source_doc = SourceDoc(
             doc_id=doc.get('doc_id', ''),
-            title=doc.get('question', ''),
+            title=doc.get('question', ''),  # 文档标题（新导入数据由解析器提取）
             content=doc.get('answer', '')[:500],
-            source_file=doc.get('category', ''),
+            source_file=doc.get('source_file') or doc.get('category', ''),
             es_score=doc.get('bm25_score', doc.get('score', 0.0)),
             vector_score=doc.get('vector_score', 0.0),
             bm25_score=doc.get('bm25_score', doc.get('score', 0.0)),

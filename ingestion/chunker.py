@@ -203,12 +203,13 @@ class SmartChunker:
         self.config.validate()
         self.token_estimator = TokenEstimator()
     
-    def chunk_text(self, text: str) -> List[str]:
+    def chunk_text(self, text: str, title: str = "") -> List[str]:
         """
         将长文本分割为多个块
         
         Args:
             text: 输入文本
+            title: 文档标题（可选），每个块会带上标题信息
             
         Returns:
             文本块列表
@@ -277,6 +278,31 @@ class SmartChunker:
             logger.debug(f"  块{i+1}: {chunk_tokens} tokens, {len(chunk)}字符")
         
         return chunks
+    
+    def chunk_text_with_title(self, text: str, title: str = "") -> List[str]:
+        """
+        将长文本分割为多个块，每个块前面加上标题
+        
+        如果 title 为空，行为与 chunk_text 相同。
+        如果 title 非空，每个块前面会加上 "[标题] {title}\\n" 前缀。
+        
+        Args:
+            text: 输入文本
+            title: 文档标题
+            
+        Returns:
+            文本块列表（每个块已包含标题前缀）
+        """
+        if not title:
+            return self.chunk_text(text)
+        
+        # 在文本前面加上标题，让分块时标题作为每个块的一部分
+        # 但为了避免标题被分到单独的块里，先正常分块，再给每个块加标题前缀
+        chunks = self.chunk_text(text)
+        result = []
+        for chunk in chunks:
+            result.append(f"[标题] {title}\n{chunk}")
+        return result
     
     def _clean_text(self, text: str) -> str:
         """清理文本"""

@@ -51,6 +51,7 @@ from dependencies import initialize_clients, get_client_manager
 
 # 导入路由
 from routes import health, ask, cache as cache_route
+from api import ingest_router
 
 
 # ============== 应用生命周期管理 ==============
@@ -111,6 +112,7 @@ app = FastAPI(
     ## 主要功能
     - **/api/ask**: 问答接口，执行完整RAG链路
     - **/api/health**: 健康检查，查看各服务状态
+    - **/api/ingest/**: 数据导入接口，支持文件上传和文本导入
     - **/**: 后台管理界面（Web UI）
     """,
     version="1.0.0",
@@ -200,18 +202,24 @@ app.include_router(ask.router)
 # 包含 cache 管理路由（/api/cache/stats /api/cache/flush）
 app.include_router(cache_route.router)
 
+# 包含数据导入路由（/api/ingest/upload /api/ingest/text 等）
+app.include_router(ingest_router.router)
+
 
 # ============== 页面路由 ==============
 
 @app.get("/", response_class=HTMLResponse)
+@app.get("/ingest", response_class=HTMLResponse)
 async def admin_page(request: Request):
     """
-    后台管理首页
+    后台管理首页 / 知识库管理页面
+    两个路径共用同一套页面 / 兼容旧入口
     返回后台管理界面的 HTML 页面
     """
+    page_file = "ingest.html" if request.url.path == "/ingest" else "index.html"
     return templates.TemplateResponse(
         request=request,
-        name="index.html",
+        name=page_file,
         context={
             "api_base_url": "/api"
         }

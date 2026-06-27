@@ -6,6 +6,8 @@
     <title>LocalRAG-CS 客服知识库问答系统</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- 自定义样式 -->
     <style>
         /* 自定义滚动条 */
@@ -104,27 +106,31 @@
     <!-- 顶部导航栏 -->
     <nav class="bg-white shadow-sm border-b border-gray-200">
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16">
-                <div class="flex items-center">
-                    <div class="flex-shrink-0 flex items-center gap-3">
-                        <!-- Logo图标 -->
-                        <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">
-                            R
-                        </div>
-                        <div>
-                            <h1 class="text-xl font-bold text-gray-900">LocalRAG-CS</h1>
-                            <p class="text-xs text-gray-500">客服知识库问答系统</p>
-                        </div>
+            <div class="flex justify-between h-16 items-center">
+                <!-- 左侧：标题和副标题 -->
+                <div class="flex items-center gap-3">
+                    <!-- Logo图标 -->
+                    <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">
+                        R
+                    </div>
+                    <div>
+                        <h1 class="text-xl font-bold text-gray-900 whitespace-nowrap">LocalRAG-CS</h1>
+                        <p class="text-xs text-gray-500 whitespace-nowrap">客服知识库问答系统</p>
                     </div>
                 </div>
-                <div class="flex items-center space-x-4">
-                    <a href="/docs" target="_blank" class="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                
+                <!-- 右侧：导航按钮 -->
+                <div class="flex items-center space-x-2" style="white-space: nowrap;">
+                    <a href="/ingest" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap">
+                        <i class="fas fa-upload mr-2"></i>知识库管理
+                    </a>
+                    <a href="/docs" target="_blank" class="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap">
                         API文档
                     </a>
-                    <a href="/api/health" target="_blank" class="text-gray-500 hover:text-green-600 px-3 py-2 rounded-md text-sm font-medium transition-colors">
+                    <a href="/api/health" target="_blank" class="text-gray-500 hover:text-green-600 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap">
                         健康检查
                     </a>
-                    <div id="status-indicator" class="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium">
+                    <div id="status-indicator" class="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium whitespace-nowrap">
                         <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                         运行中
                     </div>

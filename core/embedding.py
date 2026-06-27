@@ -71,7 +71,7 @@ class EmbeddingClient:
         """
         try:
             payload = {
-                "input": "test"
+                "content": "test"
             }
             response = requests.post(
                 self.api_url, 
@@ -110,7 +110,7 @@ class EmbeddingClient:
             ValueError: 响应格式错误
         """
         payload = {
-            "input": text
+            "content": text
         }
         
         try:

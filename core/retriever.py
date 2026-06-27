@@ -448,6 +448,7 @@ class HybridRetriever:
                 'has_vector': has_vector,  # 告诉前端是否使用了向量检索
                 'question': source.get('question', ''),
                 'answer': source.get('answer', ''),
+                'source_file': source.get('source_file', ''),
                 'category': source.get('category', ''),
                 'create_time': source.get('create_time', ''),
                 '_rrf_score': result.get('_rrf_score', 0),

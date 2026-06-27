@@ -40,6 +40,9 @@ from core.es_client import ElasticsearchClient
 from .parsers import ParserFactory, parse_file
 from .chunker import SmartChunker, ChunkConfig
 
+# 解析器模块的全局函数接口
+extract_title = ParserFactory.extract_title
+
 # 配置日志
 logging.basicConfig(
     level=logging.INFO,
@@ -285,9 +288,14 @@ class IngestionPipeline:
             
             logger.debug(f"文件解析成功，字符数: {len(content)}")
             
-            # 2. 分块
+            # 2. 提取文档标题
+            logger.debug("提取文档标题...")
+            doc_title = extract_title(file_path, content)
+            logger.debug(f"文档标题: {doc_title}")
+            
+            # 3. 分块（带标题前缀，每个块前面加上标题）
             logger.debug("开始分块...")
-            chunks = self.chunker.chunk_text(content)
+            chunks = self.chunker.chunk_text_with_title(content, title=doc_title)
             
             if not chunks:
                 result.status = 'skipped'
@@ -298,7 +306,7 @@ class IngestionPipeline:
             result.chunks_count = len(chunks)
             logger.debug(f"分块完成，共 {len(chunks)} 个块")
             
-            # 3. 生成向量（批量）
+            # 4. 生成向量（批量）
             logger.debug("开始生成向量...")
             embeddings = self._generate_embeddings(chunks)
             
@@ -306,11 +314,11 @@ class IngestionPipeline:
                 logger.warning(f"向量生成数量不匹配: 期望{len(chunks)}，实际{len(embeddings)}")
                 # 继续处理，只处理成功生成向量的块
             
-            # 4. 准备ES文档
+            # 5. 准备ES文档
             logger.debug("准备ES文档...")
-            documents = self._prepare_documents(file_path, chunks, embeddings)
+            documents = self._prepare_documents(file_path, chunks, embeddings, title=doc_title)
             
-            # 5. 写入ES
+            # 6. 写入ES
             logger.debug("写入ES索引...")
             success_count = self._write_to_es(documents)
             
@@ -341,38 +349,39 @@ class IngestionPipeline:
             chunks: 文本块列表
             
         Returns:
-            向量列表
+            向量列表（与chunks一一对应，生成失败的块用None占位）
         """
         if not chunks:
             return []
         
+        # 尝试批量编码
         try:
-            # 使用embedding客户端的批量编码功能
             embeddings = self.embedding_client.encode_batch(chunks)
             logger.debug(f"向量生成完成: {len(embeddings)} 个向量")
             return embeddings
         except Exception as e:
-            logger.error(f"向量生成失败: {e}")
-            # 尝试逐个生成
-            embeddings = []
-            for i, chunk in enumerate(chunks):
-                try:
-                    embedding = self.embedding_client.encode(chunk)
-                    embeddings.append(embedding)
-                    if (i + 1) % 10 == 0:
-                        logger.debug(f"向量生成进度: {i + 1}/{len(chunks)}")
-                except Exception as chunk_error:
-                    logger.warning(f"块 {i} 向量生成失败: {chunk_error}")
-                    # 添加空向量占位
-                    embeddings.append([0.0] * self.embedding_client.get_dimension())
-            
-            return embeddings
+            logger.warning(f"批量编码失败: {e}，尝试逐个编码")
+        
+        # 逐个编码，失败块用None占位（后续写入ES时跳过None）
+        embeddings = []
+        for i, chunk in enumerate(chunks):
+            try:
+                embedding = self.embedding_client.encode(chunk)
+                embeddings.append(embedding)
+                if (i + 1) % 10 == 0:
+                    logger.debug(f"向量生成进度: {i + 1}/{len(chunks)}")
+            except Exception as chunk_error:
+                logger.warning(f"块 {i} 向量生成失败，跳过该块: {chunk_error}")
+                embeddings.append(None)
+        
+        return embeddings
     
     def _prepare_documents(
         self, 
         file_path: Path, 
         chunks: List[str], 
-        embeddings: List[List[float]]
+        embeddings: List[Optional[List[float]]],
+        title: str = ""
     ) -> List[Dict[str, Any]]:
         """
         准备ES文档
@@ -380,7 +389,8 @@ class IngestionPipeline:
         Args:
             file_path: 源文件路径
             chunks: 文本块列表
-            embeddings: 向量列表
+            embeddings: 向量列表（None表示该块向量生成失败，跳过）
+            title: 文档标题（由解析器提取）
             
         Returns:
             ES文档列表
@@ -388,15 +398,20 @@ class IngestionPipeline:
         documents = []
         
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            # 跳过向量生成失败的块
+            if embedding is None:
+                logger.warning(f"跳过块 {i}：向量生成失败")
+                continue
+            
             # 确保向量维度正确
             if len(embedding) != self.embedding_client.get_dimension():
-                logger.warning(f"块 {i} 向量维度不匹配: 期望{self.embedding_client.get_dimension()}，实际{len(embedding)}")
+                logger.warning(f"块 {i} 向量维度不匹配: 期望{self.embedding_client.get_dimension()}，实际{len(embedding)}，跳过")
                 continue
             
             doc = {
                 'doc_id': f"{file_path.stem}_{i:04d}",
-                'question': chunk[:200],  # 前200字符作为question
-                'answer': chunk,          # 完整内容作为answer
+                'question': title if title else file_path.stem,  # 解析器提取的文档标题
+                'answer': chunk,          # 完整内容作为answer（已包含标题前缀）
                 'embedding': embedding,
                 'category': file_path.suffix[1:].upper(),  # 文件扩展名作为类别
                 'source_file': str(file_path.name),
@@ -421,31 +436,24 @@ class IngestionPipeline:
         if not documents:
             return 0
         
-        try:
-            # 使用ES客户端的批量插入功能
-            success = self.es_client.bulk_insert(self.index_name, documents)
-            if success:
-                logger.debug(f"批量插入成功: {len(documents)} 个文档")
-                return len(documents)
-            else:
-                logger.error("批量插入失败")
-                return 0
-        except Exception as e:
-            logger.error(f"ES写入失败: {e}")
-            
-            # 尝试逐个写入
-            success_count = 0
-            for i, doc in enumerate(documents):
-                try:
-                    result = self.es_client.insert_document(self.index_name, doc, doc_id=doc['doc_id'])
-                    if result:
-                        success_count += 1
-                    if (i + 1) % 10 == 0:
-                        logger.debug(f"逐个写入进度: {i + 1}/{len(documents)}")
-                except Exception as doc_error:
-                    logger.warning(f"文档 {i} 写入失败: {doc_error}")
-            
-            return success_count
+        # 逐个写入，失败的不影响其他文档
+        success_count = 0
+        for i, doc in enumerate(documents):
+            try:
+                result = self.es_client.insert_document(self.index_name, doc, doc_id=doc['doc_id'])
+                if result:
+                    success_count += 1
+                if (i + 1) % 10 == 0:
+                    logger.debug(f"写入进度: {i + 1}/{len(documents)}")
+            except Exception as doc_error:
+                logger.warning(f"文档 {i} 写入失败: {doc_error}")
+        
+        if success_count > 0:
+            logger.info(f"ES写入完成: {success_count}/{len(documents)} 个文档成功")
+        else:
+            logger.error(f"ES写入全部失败: {len(documents)} 个文档均写入失败")
+        
+        return success_count
     
     def _print_summary(self) -> None:
         """打印处理摘要"""

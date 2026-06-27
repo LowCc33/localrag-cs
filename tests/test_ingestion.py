@@ -89,6 +89,66 @@ class TestParsers:
             assert content == "全局函数测试"
         finally:
             os.unlink(temp_path)
+    
+    def test_markdown_extract_title(self):
+        """测试Markdown解析器提取标题"""
+        parser = MarkdownParser()
+        
+        # 测试：从内容中提取第一个 # 标题
+        content = "# 雇主责任险理赔流程\n\n这是文档内容。"
+        title = parser.extract_title(Path("test.md"), content)
+        assert title == "雇主责任险理赔流程"
+        
+        # 测试：无标题时回退到文件名
+        content = "没有标题的文档内容。"
+        title = parser.extract_title(Path("无标题文档.md"), content)
+        assert title == "无标题文档"
+        
+        # 测试：多个 # 标题，只取第一个
+        content = "# 第一个标题\n\n## 第二个标题\n\n内容"
+        title = parser.extract_title(Path("test.md"), content)
+        assert title == "第一个标题"
+        
+        # 测试：ParserFactory 的 extract_title 接口
+        from ingestion.parsers import ParserFactory
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.md', delete=False) as f:
+            f.write("# 工厂测试标题\n\n内容")
+            temp_path = f.name
+        try:
+            title = ParserFactory.extract_title(Path(temp_path), "# 工厂测试标题\n\n内容")
+            assert title == "工厂测试标题"
+        finally:
+            os.unlink(temp_path)
+    
+    def test_text_parser_extract_title(self):
+        """测试文本解析器提取标题（回退到文件名）"""
+        parser = TextParser()
+        title = parser.extract_title(Path("理赔说明.txt"), "文档内容")
+        assert title == "理赔说明"
+    
+    def test_chunk_text_with_title(self):
+        """测试带标题的分块"""
+        from ingestion.chunker import SmartChunker, ChunkConfig
+        config = ChunkConfig(chunk_size=100, overlap_size=10)
+        chunker = SmartChunker(config)
+        
+        # 短文本（不分块），带标题
+        text = "这是文档内容。"
+        chunks = chunker.chunk_text_with_title(text, title="测试文档")
+        assert len(chunks) == 1
+        assert "[标题] 测试文档" in chunks[0]
+        assert "这是文档内容" in chunks[0]
+        
+        # 空标题时行为与 chunk_text 相同
+        chunks_no_title = chunker.chunk_text_with_title(text, title="")
+        assert chunks_no_title == chunker.chunk_text(text)
+        
+        # 长文本分块，每个块都带标题
+        long_text = "这是文档内容。" * 50
+        chunks = chunker.chunk_text_with_title(long_text, title="长文档")
+        assert len(chunks) > 1
+        for chunk in chunks:
+            assert "[标题] 长文档" in chunk
 
 
 class TestChunker:

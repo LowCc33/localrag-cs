@@ -185,3 +185,25 @@ CACHE_KEY_PREFIX = 'localrag:cache:'
 CACHE_TTL_SECONDS = int(os.getenv('CACHE_TTL_SECONDS', 86400))
 # 单 session 统计 key（命中数/未命中数/总响应时间累计，用于 /api/cache/stats）
 CACHE_STATS_KEY = 'localrag:cache:stats'
+
+# ========== 数据导入接口配置 ==========
+# -----------------------------------------------------------------------------
+# Web 上传导入接口使用，统一放在配置文件，避免在路由中散落硬编码
+# 降级说明：Redis 不可用时任务管理器会自动降级到内存状态存储
+# -----------------------------------------------------------------------------
+MAX_FILE_SIZE = int(os.getenv('MAX_FILE_SIZE', 100 * 1024 * 1024))
+MAX_TEXT_SIZE = int(os.getenv('MAX_TEXT_SIZE', 10 * 1024 * 1024))
+UPLOAD_TEMP_DIR = os.getenv('UPLOAD_TEMP_DIR', '/tmp/localrag-uploads')
+TEXT_TEMP_DIR = os.getenv('TEXT_TEMP_DIR', '/tmp/localrag-text-uploads')
+DEFAULT_CHUNK_SIZE = int(os.getenv('DEFAULT_CHUNK_SIZE', 512))
+DEFAULT_CHUNK_OVERLAP = int(os.getenv('DEFAULT_CHUNK_OVERLAP', 50))
+MAX_CONCURRENT_TASKS = int(os.getenv('MAX_CONCURRENT_TASKS', 2))
+TASK_STATUS_TTL = int(os.getenv('TASK_STATUS_TTL', 86400))
+SUPPORTED_EXTENSIONS = tuple(
+    ext.strip().lower()
+    for ext in os.getenv(
+        'SUPPORTED_EXTENSIONS',
+        '.pdf,.txt,.md,.docx,.pptx,.xlsx,.csv,.html,.htm'
+    ).split(',')
+    if ext.strip()
+)

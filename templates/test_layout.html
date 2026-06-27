@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>布局修复测试</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body { background-color: #f9fafb; }
+        .test-container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1 class="text-2xl font-bold mb-6">LocalRAG-CS 布局修复测试</h1>
+        
+        <!-- 修复后的header示例 -->
+        <div class="bg-white p-6 rounded-lg shadow mb-8">
+            <h2 class="text-lg font-semibold mb-4">修复后的顶部导航栏</h2>
+            <nav class="bg-white shadow-sm border-b border-gray-200">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+                    <div class="flex justify-between h-16 items-center">
+                        <!-- 左侧：标题和副标题 -->
+                        <div class="flex items-center gap-3">
+                            <!-- Logo图标 -->
+                            <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">
+                                R
+                            </div>
+                            <div>
+                                <h1 class="text-xl font-bold text-gray-900 whitespace-nowrap">LocalRAG-CS</h1>
+                                <p class="text-xs text-gray-500 whitespace-nowrap">客服知识库问答系统</p>
+                            </div>
+                        </div>
+                        
+                        <!-- 右侧：导航按钮 -->
+                        <div class="flex items-center space-x-2" style="white-space: nowrap;">
+                            <a href="#" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap">
+                                <i class="fas fa-upload mr-2"></i>知识库管理
+                            </a>
+                            <a href="#" class="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap">
+                                API文档
+                            </a>
+                            <a href="#" class="text-gray-500 hover:text-green-600 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap">
+                                健康检查
+                            </a>
+                            <div class="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium whitespace-nowrap">
+                                <div class="w-2 h-2 bg-green-500 rounded-full"></div>
+                                运行中
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </nav>
+            
+            <div class="mt-4 text-sm text-gray-600">
+                <p>✅ 修复要点：</p>
+                <ul class="list-disc pl-5 mt-2 space-y-1">
+                    <li>只有一个"知识库管理"按钮</li>
+                    <li>按钮横向排列，不换行</li>
+                    <li>没有绝对定位，不会覆盖其他元素</li>
+                    <li>稳定的flex布局</li>
+                    <li>所有按钮都有white-space: nowrap</li>
+                </ul>
+            </div>
+        </div>
+        
+        <!-- 问题对比 -->
+        <div class="bg-yellow-50 p-6 rounded-lg shadow">
+            <h2 class="text-lg font-semibold mb-4">修复前的问题</h2>
+            <ul class="list-disc pl-5 space-y-2">
+                <li>多个重复的"知识库管理"按钮</li>
+                <li>按钮互相覆盖</li>
+                <li>文字被挤成竖排/换行</li>
+                <li>标题、API文档、健康检查、运行状态被遮挡</li>
+                <li>header/nav区域布局崩坏</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>
