@@ -966,6 +966,15 @@
             // 加载历史消息
             try {
                 const resp = await fetch(`${state.apiBaseUrl}/api/session/${sessionId}/history`);
+                if (resp.status === 404) {
+                    // 会话不存在（可能已被删除），清空状态
+                    console.warn('会话不存在，清空状态');
+                    state.currentSessionId = null;
+                    localStorage.removeItem('lastSessionId');
+                    document.getElementById('current-session-bar').classList.add('hidden');
+                    loadSessions();
+                    return;
+                }
                 if (resp.ok) {
                     const data = await resp.json();
                     // 更新会话标题
