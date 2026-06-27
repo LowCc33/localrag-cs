@@ -578,24 +578,40 @@ class TaskManager:
                 }
             
             # 按doc_id删除
-            # 先查询匹配的文档数
+            # doc_id是keyword类型，直接term查询
+            # 前端传的doc_id可能是完整doc_id（如 006_5-施工保_0000）
+            # 也可能是文件名前缀（如 006_5-施工保）
+            
+            # 先尝试精确匹配
             count_resp = es.client.count(
                 index=index_name,
                 body={
                     "query": {
-                        "term": {"doc_id.keyword": doc_id}
+                        "term": {"doc_id": doc_id}
                     }
                 }
             )
             match_count = count_resp.get('count', 0)
             
             if match_count == 0:
-                # 尝试按source_file前缀匹配（doc_id格式：文件名_索引）
+                # 尝试按前缀匹配（doc_id格式：文件名_索引号）
                 count_resp = es.client.count(
                     index=index_name,
                     body={
                         "query": {
-                            "wildcard": {"doc_id.keyword": f"{doc_id}_*"}
+                            "prefix": {"doc_id": doc_id}
+                        }
+                    }
+                )
+                match_count = count_resp.get('count', 0)
+            
+            if match_count == 0:
+                # 再尝试按source_file匹配
+                count_resp = es.client.count(
+                    index=index_name,
+                    body={
+                        "query": {
+                            "term": {"source_file": doc_id}
                         }
                     }
                 )
@@ -617,8 +633,9 @@ class TaskManager:
                     "query": {
                         "bool": {
                             "should": [
-                                {"term": {"doc_id.keyword": doc_id}},
-                                {"wildcard": {"doc_id.keyword": f"{doc_id}_*"}}
+                                {"term": {"doc_id": doc_id}},
+                                {"prefix": {"doc_id": doc_id}},
+                                {"term": {"source_file": doc_id}}
                             ]
                         }
                     }
