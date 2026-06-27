@@ -228,9 +228,24 @@
                         <i class="fas fa-hashtag text-blue-400"></i>
                         <span id="current-session-title" class="font-medium text-gray-800">新会话</span>
                     </div>
-                    <button id="clear-session-btn" class="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors">
-                        <i class="fas fa-eraser mr-1"></i>清空
-                    </button>
+                    <div class="flex items-center gap-2">
+                        <div class="relative" id="export-dropdown-container">
+                            <button id="export-btn" class="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors" title="导出报告">
+                                <i class="fas fa-download mr-1"></i>导出
+                            </button>
+                            <div id="export-dropdown" class="hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-32">
+                                <button id="export-pdf-btn" class="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left flex items-center gap-2">
+                                    <i class="fas fa-file-pdf text-red-500"></i>导出 PDF
+                                </button>
+                                <button id="export-docx-btn" class="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left flex items-center gap-2">
+                                    <i class="fas fa-file-word text-blue-500"></i>导出 Word
+                                </button>
+                            </div>
+                        </div>
+                        <button id="clear-session-btn" class="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors">
+                            <i class="fas fa-eraser mr-1"></i>清空
+                        </button>
+                    </div>
                 </div>
                 
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -1073,6 +1088,57 @@
             }
         }
         
+        // 导出报告
+        async function exportReport(format) {
+            if (!state.currentSessionId) {
+                alert('请先创建或选择一个会话');
+                return;
+            }
+            
+            const exportBtn = document.getElementById('export-btn');
+            const originalHtml = exportBtn.innerHTML;
+            exportBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>导出中...';
+            exportBtn.disabled = true;
+            
+            try {
+                const resp = await fetch(`${state.apiBaseUrl}/api/export/${format}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        session_id: state.currentSessionId,
+                        title: document.getElementById('current-session-title').textContent || '问答报告',
+                        include_sources: true
+                    })
+                });
+                
+                if (!resp.ok) {
+                    const err = await resp.json();
+                    throw new Error(err.detail || '导出失败');
+                }
+                
+                // 触发文件下载
+                const blob = await resp.blob();
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                // 从 Content-Disposition 获取文件名
+                const disposition = resp.headers.get('Content-Disposition');
+                const filenameMatch = disposition && disposition.match(/filename="?([^"]+)"?/);
+                a.download = filenameMatch ? filenameMatch[1] : `report.${format}`;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                
+            } catch (e) {
+                alert('导出失败: ' + e.message);
+            } finally {
+                exportBtn.innerHTML = originalHtml;
+                exportBtn.disabled = false;
+                document.getElementById('export-dropdown').classList.add('hidden');
+            }
+        }
+        
         // 清空当前会话
         async function clearCurrentSession() {
             if (!state.currentSessionId) return;
@@ -1117,6 +1183,26 @@
             
             // 清空当前会话
             document.getElementById('clear-session-btn').addEventListener('click', clearCurrentSession);
+            
+            // 导出报告
+            document.getElementById('export-btn').addEventListener('click', function(e) {
+                e.stopPropagation();
+                const dropdown = document.getElementById('export-dropdown');
+                dropdown.classList.toggle('hidden');
+            });
+            
+            // 点击其他地方关闭导出下拉
+            document.addEventListener('click', function() {
+                document.getElementById('export-dropdown').classList.add('hidden');
+            });
+            
+            document.getElementById('export-pdf-btn').addEventListener('click', function() {
+                exportReport('pdf');
+            });
+            
+            document.getElementById('export-docx-btn').addEventListener('click', function() {
+                exportReport('docx');
+            });
             
             // 移动端会话列表切换
             document.getElementById('mobile-session-toggle').addEventListener('click', function() {

@@ -50,7 +50,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from dependencies import initialize_clients, get_client_manager
 
 # 导入路由
-from routes import health, ask, cache as cache_route, session as session_route
+from routes import health, ask, cache as cache_route, session as session_route, export as export_route
 from api import ingest_router
 
 
@@ -207,6 +207,9 @@ app.include_router(ingest_router.router)
 
 # 包含会话管理路由（/api/session/new /api/sessions 等）
 app.include_router(session_route.router)
+
+# 包含导出路由（/api/export/pdf /api/export/docx）
+app.include_router(export_route.router)
 
 
 # ============== 页面路由 ==============
