@@ -217,15 +217,37 @@
                     </div>
                 </div>
                 
+                <!-- 知识库概览 -->
+                <div class="bg-white rounded-lg shadow p-6">
+                    <h2 class="text-lg font-semibold text-gray-900 mb-4">
+                        <i class="fas fa-chart-pie mr-2"></i>知识库概览
+                    </h2>
+                    <div id="kb-overview">
+                        <!-- 文件类型分布 -->
+                        <div id="file-type-dist" class="space-y-2 mb-4">
+                            <div class="text-center text-gray-500 py-2 text-sm">加载中...</div>
+                        </div>
+                        <!-- 活跃度 -->
+                        <div id="kb-activity" class="border-t border-gray-100 pt-3 mt-3 space-y-2 text-sm">
+                            <div class="text-center text-gray-500 py-2">加载中...</div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- 最近导入的文档 -->
                 <div class="bg-white rounded-lg shadow p-6">
                     <div class="flex justify-between items-center mb-4">
                         <h2 class="text-lg font-semibold text-gray-900">
                             <i class="fas fa-history mr-2"></i>最近导入
                         </h2>
-                        <button id="refresh-docs" class="text-blue-600 hover:text-blue-800">
-                            <i class="fas fa-redo"></i>
-                        </button>
+                        <div class="flex items-center gap-2">
+                            <button id="view-all-docs" class="px-3 py-1.5 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition">
+                                <i class="fas fa-list mr-1"></i>查看全部
+                            </button>
+                            <button id="refresh-docs" class="text-blue-600 hover:text-blue-800">
+                                <i class="fas fa-redo"></i>
+                            </button>
+                        </div>
                     </div>
                     <div id="recent-docs" class="space-y-3 max-h-80 overflow-y-auto">
                         <div class="text-center text-gray-500 py-4">
@@ -233,6 +255,57 @@
                             <p>暂无文档</p>
                         </div>
                         <!-- 文档项将通过JS动态添加 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 文档管理弹窗 -->
+    <div id="doc-modal" class="fixed inset-0 z-50 hidden overflow-y-auto" aria-modal="true">
+        <div class="flex items-start justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
+            <!-- 遮罩层 -->
+            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" id="modal-overlay"></div>
+            
+            <!-- 弹窗主体 -->
+            <div class="inline-block align-bottom bg-white rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full">
+                <div class="bg-white px-6 py-4 border-b border-gray-200 flex items-center justify-between">
+                    <h3 class="text-lg font-semibold text-gray-900">
+                        <i class="fas fa-database mr-2 text-blue-600"></i>知识库文档管理
+                    </h3>
+                    <button id="modal-close" class="text-gray-400 hover:text-gray-600 transition">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                
+                <div class="px-6 py-4">
+                    <!-- 搜索栏（预留） -->
+                    <div class="mb-4">
+                        <div class="relative">
+                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
+                            <input type="text" id="doc-search" placeholder="搜索文档..." class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
+                        </div>
+                    </div>
+                    
+                    <!-- 文档列表 -->
+                    <div id="modal-doc-list" class="space-y-2 max-h-96 overflow-y-auto">
+                        <div class="text-center text-gray-500 py-8">
+                            <i class="fas fa-file-alt text-3xl mb-2"></i>
+                            <p>加载中...</p>
+                        </div>
+                    </div>
+                    
+                    <!-- 分页 -->
+                    <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
+                        <div class="text-sm text-gray-500" id="modal-page-info">第 0/0 页</div>
+                        <div class="flex items-center gap-2">
+                            <button id="modal-prev-page" class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                                <i class="fas fa-chevron-left mr-1"></i>上一页
+                            </button>
+                            <button id="modal-next-page" class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
+                                下一页<i class="fas fa-chevron-right ml-1"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -385,6 +458,31 @@
             
             // 刷新文档列表
             refreshDocsBtn.addEventListener('click', loadRecentDocuments);
+            
+            // 查看全部文档
+            document.getElementById('view-all-docs').addEventListener('click', openDocModal);
+            
+            // 弹窗关闭
+            document.getElementById('modal-close').addEventListener('click', closeDocModal);
+            document.getElementById('modal-overlay').addEventListener('click', closeDocModal);
+            
+            // 弹窗分页
+            document.getElementById('modal-prev-page').addEventListener('click', prevPage);
+            document.getElementById('modal-next-page').addEventListener('click', nextPage);
+            
+            // 弹窗搜索
+            let searchTimer;
+            document.getElementById('doc-search').addEventListener('input', () => {
+                clearTimeout(searchTimer);
+                searchTimer = setTimeout(applyDocSearch, 300);
+            });
+            
+            // ESC关闭弹窗
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && !document.getElementById('doc-modal').classList.contains('hidden')) {
+                    closeDocModal();
+                }
+            });
         }
         
         function handleFiles(files) {
@@ -768,31 +866,98 @@
         
         async function loadStats() {
             try {
-                // 这里应该调用API获取统计数据
-                // 暂时使用模拟数据
-                totalDocsEl.textContent = '--';
-                totalChunksEl.textContent = '--';
-                totalSizeEl.textContent = '-- MB';
-                
-                // 尝试从文档列表推断统计信息
-                const response = await fetch(`${API_BASE}/documents?limit=100`);
+                const response = await fetch(`${API_BASE}/stats`);
                 if (response.ok) {
-                    const data = await response.json();
+                    const stats = await response.json();
+                    totalDocsEl.textContent = stats.total_documents || 0;
+                    totalChunksEl.textContent = (stats.total_chunks || 0).toLocaleString();
+                    totalSizeEl.textContent = stats.storage_used_mb
+                        ? `${stats.storage_used_mb.toFixed(1)} MB`
+                        : `${Math.round((stats.total_chunks || 0) * 0.1)} MB`;
                     
-                    if (data.documents && Array.isArray(data.documents)) {
-                        totalDocsEl.textContent = data.documents.length;
-                        
-                        // 计算总chunks数
-                        const totalChunks = data.documents.reduce((sum, doc) => sum + (doc.chunks || 0), 0);
-                        totalChunksEl.textContent = totalChunks.toLocaleString();
-                        
-                        // 估算占用空间
-                        const estimatedSizeMB = Math.round(totalChunks * 0.1); // 假设每个chunk约0.1KB
-                        totalSizeEl.textContent = `${estimatedSizeMB} MB`;
-                    }
+                    // 更新知识库概览
+                    updateKbOverview(stats);
                 }
             } catch (error) {
                 console.error('加载统计数据失败:', error);
+            }
+        }
+        
+        // 知识库概览
+        async function updateKbOverview(stats) {
+            // 文件类型分布 - 从文档列表统计
+            try {
+                const resp = await fetch(`${API_BASE}/documents?limit=500&offset=0`);
+                if (!resp.ok) throw new Error('加载文档列表失败');
+                const data = await resp.json();
+                const docs = data.documents || [];
+                
+                // 按类型统计
+                const typeCount = {};
+                docs.forEach(doc => {
+                    const type = (doc.file_type || 'other').toUpperCase();
+                    typeCount[type] = (typeCount[type] || 0) + 1;
+                });
+                
+                const total = docs.length;
+                const typeOrder = ['PDF', 'DOCX', 'MD', 'TXT', 'CSV'];
+                const typeIcons = {
+                    'PDF': 'fas fa-file-pdf',
+                    'DOCX': 'fas fa-file-word',
+                    'MD': 'fab fa-markdown',
+                    'TXT': 'fas fa-file-alt',
+                    'CSV': 'fas fa-file-csv'
+                };
+                
+                const distEl = document.getElementById('file-type-dist');
+                if (total === 0) {
+                    distEl.innerHTML = '<div class="text-center text-gray-500 py-2 text-sm">暂无文档</div>';
+                } else {
+                    distEl.innerHTML = typeOrder
+                        .filter(t => typeCount[t])
+                        .map(type => {
+                            const count = typeCount[type] || 0;
+                            const pct = ((count / total) * 100).toFixed(0);
+                            const icon = typeIcons[type] || 'fas fa-file';
+                            return `
+                                <div class="flex items-center justify-between text-sm">
+                                    <div class="flex items-center gap-2">
+                                        <i class="${icon} text-gray-500"></i>
+                                        <span class="text-gray-700">${type}</span>
+                                    </div>
+                                    <div class="flex items-center gap-2">
+                                        <div class="w-24 bg-gray-200 rounded-full h-2">
+                                            <div class="bg-blue-500 h-2 rounded-full" style="width: ${pct}%"></div>
+                                        </div>
+                                        <span class="text-gray-500 text-xs w-16 text-right">${count} 个 (${pct}%)</span>
+                                    </div>
+                                </div>
+                            `;
+                        }).join('');
+                }
+                
+                // 活跃度
+                const activityEl = document.getElementById('kb-activity');
+                const lastImport = stats.last_import_time ? formatDate(stats.last_import_time) : '暂无';
+                const completed24h = stats.completed_tasks_24h || 0;
+                const failed24h = stats.failed_tasks_24h || 0;
+                activityEl.innerHTML = `
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">最近导入</span>
+                        <span class="font-medium">${lastImport}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">24h完成任务</span>
+                        <span class="font-medium text-green-600">${completed24h}</span>
+                    </div>
+                    <div class="flex justify-between">
+                        <span class="text-gray-600">24h失败任务</span>
+                        <span class="font-medium ${failed24h > 0 ? 'text-red-600' : 'text-gray-600'}">${failed24h}</span>
+                    </div>
+                `;
+                
+            } catch (error) {
+                console.error('加载知识库概览失败:', error);
             }
         }
         
@@ -876,6 +1041,169 @@
                 return date.toLocaleDateString('zh-CN');
             } catch (e) {
                 return dateString;
+            }
+        }
+        
+        // ========== 文档管理弹窗 ==========
+        
+        let modalCurrentPage = 0;
+        let modalTotalPages = 0;
+        let modalAllDocs = [];
+        let modalFilteredDocs = [];
+        const MODAL_PAGE_SIZE = 50;
+        
+        // 打开弹窗
+        function openDocModal() {
+            document.getElementById('doc-modal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+            loadAllDocuments();
+        }
+        
+        // 关闭弹窗
+        function closeDocModal() {
+            document.getElementById('doc-modal').classList.add('hidden');
+            document.body.style.overflow = '';
+        }
+        
+        // 加载全部文档
+        async function loadAllDocuments() {
+            const listEl = document.getElementById('modal-doc-list');
+            listEl.innerHTML = '<div class="text-center text-gray-500 py-8"><i class="fas fa-spinner fa-spin text-3xl mb-2"></i><p>加载中...</p></div>';
+            
+            try {
+                const response = await fetch(`${API_BASE}/documents?limit=500&offset=0`);
+                if (!response.ok) throw new Error(`加载失败: ${response.status}`);
+                
+                const data = await response.json();
+                modalAllDocs = data.documents || [];
+                
+                // 应用搜索过滤
+                applyDocSearch();
+                
+            } catch (error) {
+                listEl.innerHTML = `<div class="text-center text-red-500 py-8"><i class="fas fa-exclamation-triangle text-3xl mb-2"></i><p>加载失败: ${error.message}</p></div>`;
+            }
+        }
+        
+        // 搜索过滤
+        function applyDocSearch() {
+            const searchText = document.getElementById('doc-search').value.trim().toLowerCase();
+            if (searchText) {
+                modalFilteredDocs = modalAllDocs.filter(doc => 
+                    (doc.title || '').toLowerCase().includes(searchText) ||
+                    (doc.file_type || '').toLowerCase().includes(searchText)
+                );
+            } else {
+                modalFilteredDocs = [...modalAllDocs];
+            }
+            
+            modalTotalPages = Math.ceil(modalFilteredDocs.length / MODAL_PAGE_SIZE) || 1;
+            modalCurrentPage = 0;
+            renderDocPage();
+        }
+        
+        // 渲染当前页
+        function renderDocPage() {
+            const listEl = document.getElementById('modal-doc-list');
+            const pageInfo = document.getElementById('modal-page-info');
+            const prevBtn = document.getElementById('modal-prev-page');
+            const nextBtn = document.getElementById('modal-next-page');
+            
+            const start = modalCurrentPage * MODAL_PAGE_SIZE;
+            const end = Math.min(start + MODAL_PAGE_SIZE, modalFilteredDocs.length);
+            const pageDocs = modalFilteredDocs.slice(start, end);
+            
+            if (modalFilteredDocs.length === 0) {
+                listEl.innerHTML = '<div class="text-center text-gray-500 py-8"><i class="fas fa-inbox text-3xl mb-2"></i><p>暂无文档</p></div>';
+                pageInfo.textContent = '第 0/0 页';
+                prevBtn.disabled = true;
+                nextBtn.disabled = true;
+                return;
+            }
+            
+            listEl.innerHTML = pageDocs.map((doc, idx) => {
+                const fileIcon = getFileIcon(doc.title || 'unknown.txt');
+                const typeLabel = (doc.file_type || '').toUpperCase();
+                return `
+                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition group" data-doc-id="${escapeHtml(doc.doc_id)}">
+                        <div class="flex items-center flex-1 min-w-0">
+                            <div class="flex-shrink-0 text-gray-500 mr-3">
+                                <i class="${fileIcon} text-xl"></i>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <p class="font-medium text-gray-900 truncate">${escapeHtml(doc.title || '未命名文档')}</p>
+                                <div class="flex items-center text-sm text-gray-500 mt-1 gap-3">
+                                    <span class="px-2 py-0.5 bg-gray-200 rounded text-xs font-medium">${typeLabel}</span>
+                                    <span><i class="fas fa-cube mr-1"></i>${doc.chunks || 0} chunks</span>
+                                    <span><i class="fas fa-calendar-alt mr-1"></i>${formatDate(doc.import_time)}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="ml-3 p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all delete-doc-btn" 
+                                data-doc-id="${escapeHtml(doc.doc_id)}" data-doc-title="${escapeHtml(doc.title || '未命名文档')}"
+                                title="删除文档">
+                            <i class="fas fa-trash-alt"></i>
+                        </button>
+                    </div>
+                `;
+            }).join('');
+            
+            // 绑定删除按钮
+            listEl.querySelectorAll('.delete-doc-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    const docId = e.currentTarget.dataset.docId;
+                    const docTitle = e.currentTarget.dataset.docTitle;
+                    deleteDocument(docId, docTitle);
+                });
+            });
+            
+            // 更新分页
+            const currentPageNum = modalCurrentPage + 1;
+            pageInfo.textContent = `第 ${currentPageNum}/${modalTotalPages} 页（共 ${modalFilteredDocs.length} 条）`;
+            prevBtn.disabled = modalCurrentPage <= 0;
+            nextBtn.disabled = modalCurrentPage >= modalTotalPages - 1;
+        }
+        
+        // 删除文档
+        async function deleteDocument(docId, docTitle) {
+            if (!confirm(`确定要删除「${docTitle}」吗？此操作不可撤销。`)) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/${docId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`删除失败: ${response.status}`);
+                }
+                
+                const result = await response.json();
+                showNotification(`已删除「${docTitle}」(${result.deleted_chunks || 0}个chunks)`, 'success');
+                
+                // 刷新文档列表和统计
+                loadAllDocuments();
+                loadStats();
+                loadRecentDocuments();
+                
+            } catch (error) {
+                showNotification(`删除失败: ${error.message}`, 'error');
+            }
+        }
+        
+        // 分页事件
+        function prevPage() {
+            if (modalCurrentPage > 0) {
+                modalCurrentPage--;
+                renderDocPage();
+            }
+        }
+        
+        function nextPage() {
+            if (modalCurrentPage < modalTotalPages - 1) {
+                modalCurrentPage++;
+                renderDocPage();
             }
         }
         
