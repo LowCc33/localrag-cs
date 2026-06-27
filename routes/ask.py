@@ -80,11 +80,20 @@ async def ask_endpoint(
     
     try:
         # ========== 阶段0: 会话历史处理 ==========
+        # 如果没有 session_id，自动创建新会话
+        session_id = request.session_id
+        if not session_id:
+            try:
+                session_id = session_manager.create_session(request.question[:50])
+                logger.info(f"自动创建新会话: {session_id}")
+            except Exception as e:
+                logger.warning(f"自动创建会话失败: {e}")
+
         # 如果传了 session_id，获取历史消息构建上下文
         session_context = ""
-        if request.session_id:
+        if session_id:
             try:
-                history = session_manager.get_history(request.session_id, limit=16)
+                history = session_manager.get_history(session_id, limit=16)
                 if history:
                     # 将历史消息格式化为上下文
                     history_lines = []
@@ -92,10 +101,19 @@ async def ask_endpoint(
                         role_name = "用户" if msg["role"] == "user" else "助手"
                         history_lines.append(f"{role_name}: {msg['content']}")
                     session_context = "\n".join(history_lines)
-                    logger.debug(f"会话 {request.session_id}: 加载 {len(history)} 条历史消息")
+                    logger.debug(f"会话 {session_id}: 加载 {len(history)} 条历史消息")
             except Exception as e:
                 logger.warning(f"加载会话历史失败: {e}")
         
+        # 如果没有 session_id，自动创建新会话
+        if not session_id:
+            try:
+                new_sid = session_manager.create_session(request.question[:50])
+                session_id = new_sid
+                logger.info(f"自动创建新会话: {new_sid}")
+            except Exception as e:
+                logger.warning(f"自动创建会话失败: {e}")
+
         # ========== 阶段0.5: 查缓存（任务 localrag-redis-cache 接入点） ==========
         # 命中直接返回，绕过检索 + 重排 + LLM 三阶段，毫秒级响应
         # 未命中走原流程，并在最后写回缓存
@@ -262,19 +280,19 @@ async def ask_endpoint(
             )
 
         # ========== 写入会话历史 ==========
-        if request.session_id:
+        if session_id:
             try:
                 # 写入用户问题
-                session_manager.add_message(request.session_id, "user", request.question)
+                session_manager.add_message(session_id, "user", request.question)
                 # 写入助手回答
-                session_manager.add_message(request.session_id, "assistant", answer)
+                session_manager.add_message(session_id, "assistant", answer)
                 # 如果是该会话的第一条消息，自动设置标题
-                msg_count = session_manager.get_message_count(request.session_id)
+                msg_count = session_manager.get_message_count(session_id)
                 if msg_count <= 2:  # 只有 user+assistant 两条
                     title = request.question[:50]
                     if len(request.question) > 50:
                         title += "..."
-                    session_manager.update_session_title(request.session_id, title)
+                    session_manager.update_session_title(session_id, title)
             except Exception as e:
                 logger.warning(f"写入会话历史失败: {e}")
 
@@ -294,6 +312,7 @@ async def ask_endpoint(
             status="success",
             cache_status="MISS",
             response_time_ms=round(total_ms, 2),
+            session_id=session_id,
         )
         
     except HTTPException:
@@ -367,13 +386,36 @@ async def ask_stream_endpoint(
 
     total_start = time.perf_counter()
 
-    # ---------- 阶段0：查缓存（命中直接整段吐出，绕过检索+重排+LLM） ----------
+    # ---------- 阶段0：自动创建会话 ----------
+    session_id = request.session_id
+    if not session_id:
+        try:
+            session_id = session_manager.create_session(request.question[:50])
+            logger.info(f"流式接口自动创建新会话: {session_id}")
+        except Exception as e:
+            logger.warning(f"流式接口自动创建会话失败: {e}")
+
+    # ---------- 阶段0.5：查缓存（命中直接整段吐出，绕过检索+重排+LLM） ----------
     cached = cache_service.get_cache(request.question)
     if cached is not None:
         cached_answer = cached.get("answer", "")
         cached_sources = cached.get("sources", [])
         cached_at = cached.get("cached_at")
         cache_total_ms = (time.perf_counter() - total_start) * 1000
+
+        # 缓存命中时也写入会话历史
+        if session_id:
+            try:
+                session_manager.add_message(session_id, "user", request.question)
+                session_manager.add_message(session_id, "assistant", cached_answer)
+                msg_count = session_manager.get_message_count(session_id)
+                if msg_count <= 2:
+                    title = request.question[:50]
+                    if len(request.question) > 50:
+                        title += "..."
+                    session_manager.update_session_title(session_id, title)
+            except Exception as e:
+                logger.warning(f"缓存命中写入会话历史失败: {e}")
 
         async def _hit_gen():
             # 命中时一次性把完整答案推下去，前端打字机感会变弱但符合"毫秒级响应"演示意图
@@ -393,6 +435,7 @@ async def ask_stream_endpoint(
                 "cache_status": "HIT",
                 "response_time_ms": round(cache_total_ms, 2),
                 "cached_at": cached_at,
+                "session_id": session_id,
             })
 
         return StreamingResponse(
@@ -422,7 +465,7 @@ async def ask_stream_endpoint(
 
         async def _err_gen():
             yield _format_sse(config.SSE_EVENT_ERROR, {"message": f"检索失败: {str(e)}"})
-            yield _format_sse(config.SSE_EVENT_DONE, {"status": "error"})
+            yield _format_sse(config.SSE_EVENT_DONE, {"status": "error", "session_id": session_id})
 
         return StreamingResponse(_err_gen(), media_type="text/event-stream; charset=utf-8")
 
@@ -448,6 +491,7 @@ async def ask_stream_endpoint(
                 "status": "success",
                 "retrieved_count": 0,
                 "reranked_count": 0,
+                "session_id": session_id,
             })
 
         return StreamingResponse(_empty_gen(), media_type="text/event-stream; charset=utf-8")

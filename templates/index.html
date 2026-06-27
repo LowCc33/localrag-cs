@@ -808,6 +808,12 @@
                         // 触发顶部统计条刷新（拉服务端累计）
                         refreshCacheStats();
                     }
+                    // 处理返回的 session_id（新会话自动创建）
+                    if (data && data.session_id) {
+                        state.currentSessionId = data.session_id;
+                        localStorage.setItem('lastSessionId', data.session_id);
+                        document.getElementById('current-session-bar').classList.remove('hidden');
+                    }
                     // 刷新会话列表（新会话创建或标题更新）
                     loadSessions();
                     break;
@@ -839,6 +845,13 @@
                 renderCacheBadge(data.cache_status, data.response_time_ms);
                 accumulateLocalStats(data.cache_status, data.response_time_ms);
                 refreshCacheStats();
+            }
+            // 处理返回的 session_id（新会话自动创建）
+            if (data.session_id) {
+                state.currentSessionId = data.session_id;
+                localStorage.setItem('lastSessionId', data.session_id);
+                document.getElementById('current-session-bar').classList.remove('hidden');
+                document.getElementById('current-session-title').textContent = data.question.slice(0, 50) + (data.question.length > 50 ? '...' : '');
             }
         }
         

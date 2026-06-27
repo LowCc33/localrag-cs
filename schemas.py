@@ -93,6 +93,9 @@ class AskResponse(BaseModel):
     response_time_ms: Optional[float] = Field(
         default=None, description="端到端响应耗时（毫秒），用于前端徽章展示"
     )
+    session_id: Optional[str] = Field(
+        default=None, description="当前会话ID"
+    )
     cached_at: Optional[str] = Field(
         default=None, description="缓存写入时间，仅 HIT 时返回"
     )
