@@ -26,6 +26,7 @@ import sys
 import logging
 import uuid
 from typing import List, Optional, Dict, Any
+from datetime import datetime
 from pathlib import Path
 
 # FastAPI 相关导入
@@ -37,6 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 # 导入配置和任务管理器
 import config
+from core.es_client import ElasticsearchClient
 from ingestion.task_manager import get_task_manager
 
 # 配置日志
@@ -762,3 +764,318 @@ def initialize_router():
     """初始化路由模块"""
     logger.info("✅ 数据导入API路由初始化完成")
     return router
+# ========== 分类/标签管理 API ==========
+
+
+class CategoryCreateRequest(BaseModel):
+    """创建分类请求模型"""
+    name: str = Field(..., min_length=1, max_length=50, description="分类名称")
+    description: str = Field(default="", max_length=200, description="分类描述")
+    color: str = Field(default="#3B82F6", description="分类颜色（十六进制）")
+
+
+class CategoryUpdateRequest(BaseModel):
+    """更新分类请求模型"""
+    name: Optional[str] = Field(None, min_length=1, max_length=50, description="分类名称")
+    description: Optional[str] = Field(None, max_length=200, description="分类描述")
+    color: Optional[str] = Field(None, description="分类颜色（十六进制）")
+
+
+class CategoryResponse(BaseModel):
+    """分类响应模型"""
+    cat_id: str = Field(..., description="分类ID")
+    name: str = Field(..., description="分类名称")
+    description: str = Field(default="", description="分类描述")
+    color: str = Field(default="#3B82F6", description="分类颜色")
+    created_at: str = Field(..., description="创建时间")
+    doc_count: int = Field(default=0, description="关联文档数")
+
+
+class TagRequest(BaseModel):
+    """文档标签请求模型"""
+    tags: List[str] = Field(default=[], description="标签列表（最多10个）")
+    category_id: Optional[str] = Field(None, description="分类ID")
+
+
+@router.post(
+    "/categories",
+    response_model=CategoryResponse,
+    summary="创建分类",
+    tags=["categories"]
+)
+async def create_category(req: CategoryCreateRequest):
+    """创建新分类"""
+    try:
+        es = ElasticsearchClient()
+        cat_id = f"cat_{uuid.uuid4().hex[:12]}"
+        now = datetime.now().isoformat()
+
+        doc = {
+            "cat_id": cat_id,
+            "name": req.name,
+            "description": req.description,
+            "color": req.color,
+            "created_at": now,
+            "doc_count": 0
+        }
+
+        es.client.index(index=config.CATEGORY_INDEX_NAME, id=cat_id, body=doc, refresh=True)
+        logger.info(f"✅ 创建分类: {cat_id} - {req.name}")
+
+        return CategoryResponse(**doc)
+    except Exception as e:
+        logger.error(f"创建分类失败: {e}")
+        raise HTTPException(status_code=500, detail=f"创建分类失败: {str(e)}")
+
+
+@router.get(
+    "/categories",
+    response_model=List[CategoryResponse],
+    summary="获取所有分类",
+    tags=["categories"]
+)
+async def list_categories():
+    """获取所有分类列表"""
+    try:
+        es = ElasticsearchClient()
+        resp = es.client.search(
+            index=config.CATEGORY_INDEX_NAME,
+            body={"size": 100, "sort": [{"created_at": {"order": "desc"}}]}
+        )
+
+        categories = []
+        for hit in resp["hits"]["hits"]:
+            src = hit["_source"]
+            categories.append(CategoryResponse(**src))
+
+        return categories
+    except Exception as e:
+        logger.error(f"获取分类列表失败: {e}")
+        return []
+
+
+@router.put(
+    "/categories/{cat_id}",
+    response_model=CategoryResponse,
+    summary="更新分类",
+    tags=["categories"]
+)
+async def update_category(cat_id: str, req: CategoryUpdateRequest):
+    """更新分类信息"""
+    try:
+        es = ElasticsearchClient()
+
+        # 检查分类是否存在
+        try:
+            es.client.get(index=config.CATEGORY_INDEX_NAME, id=cat_id)
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"分类不存在: {cat_id}")
+
+        # 构建更新字段
+        update_body: Dict[str, Any] = {}
+        if req.name is not None:
+            update_body["name"] = req.name
+        if req.description is not None:
+            update_body["description"] = req.description
+        if req.color is not None:
+            update_body["color"] = req.color
+
+        if update_body:
+            es.client.update(
+                index=config.CATEGORY_INDEX_NAME,
+                id=cat_id,
+                body={"doc": update_body},
+                refresh=True
+            )
+
+        # 返回更新后的分类
+        resp = es.client.get(index=config.CATEGORY_INDEX_NAME, id=cat_id)
+        return CategoryResponse(**resp["_source"])
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新分类失败: {e}")
+        raise HTTPException(status_code=500, detail=f"更新分类失败: {str(e)}")
+
+
+@router.delete(
+    "/categories/{cat_id}",
+    summary="删除分类",
+    tags=["categories"]
+)
+async def delete_category(cat_id: str):
+    """删除分类，同时解绑所有关联文档"""
+    try:
+        es = ElasticsearchClient()
+
+        # 检查分类是否存在
+        try:
+            cat = es.client.get(index=config.CATEGORY_INDEX_NAME, id=cat_id)
+        except Exception:
+            raise HTTPException(status_code=404, detail=f"分类不存在: {cat_id}")
+
+        cat_name = cat["_source"].get("name", cat_id)
+
+        # 解绑关联文档（将category_id设为null）
+        es.client.update_by_query(
+            index=config.ES_INDEX_NAME,
+            body={
+                "script": {
+                    "source": "ctx._source.category_id = null"
+                },
+                "query": {
+                    "term": {"category_id": cat_id}
+                }
+            },
+            refresh=True
+        )
+
+        # 删除分类
+        es.client.delete(index=config.CATEGORY_INDEX_NAME, id=cat_id, refresh=True)
+        logger.info(f"✅ 删除分类: {cat_id} - {cat_name}")
+
+        return {
+            "success": True,
+            "message": f"分类「{cat_name}」已删除，关联文档已解绑",
+            "deleted_cat_id": cat_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除分类失败: {e}")
+        raise HTTPException(status_code=500, detail=f"删除分类失败: {str(e)}")
+
+
+@router.post(
+    "/documents/{doc_id}/tags",
+    summary="设置文档分类和标签",
+    tags=["categories"]
+)
+async def set_document_tags(doc_id: str, req: TagRequest):
+    """设置文档的分类和标签"""
+    try:
+        es = ElasticsearchClient()
+
+        # 检查文档是否存在
+        count = es.client.count(
+            index=config.ES_INDEX_NAME,
+            body={"query": {"term": {"doc_id": doc_id}}}
+        )
+        if count.get("count", 0) == 0:
+            # 尝试前缀匹配
+            count = es.client.count(
+                index=config.ES_INDEX_NAME,
+                body={"query": {"prefix": {"doc_id": doc_id}}}
+            )
+            if count.get("count", 0) == 0:
+                raise HTTPException(status_code=404, detail=f"文档不存在: {doc_id}")
+
+        # 限制标签数量
+        if len(req.tags) > 10:
+            raise HTTPException(status_code=400, detail="标签数量不能超过10个")
+
+        # 更新文档
+        update_doc: Dict[str, Any] = {}
+        if req.tags is not None:
+            update_doc["tags"] = req.tags
+        if req.category_id is not None:
+            update_doc["category_id"] = req.category_id
+
+        if update_doc:
+            es.client.update_by_query(
+                index=config.ES_INDEX_NAME,
+                body={
+                    "script": {
+                        "source": "for (entry in params.updates.entrySet()) { ctx._source[entry.getKey()] = entry.getValue() }",
+                        "params": {"updates": update_doc}
+                    },
+                    "query": {
+                        "bool": {
+                            "should": [
+                                {"term": {"doc_id": doc_id}},
+                                {"prefix": {"doc_id": doc_id}}
+                            ]
+                        }
+                    }
+                },
+                refresh=True
+            )
+
+            # 更新分类的文档计数
+            if req.category_id:
+                _update_category_doc_count(es, req.category_id)
+
+        logger.info(f"✅ 更新文档标签: {doc_id}")
+
+        return {
+            "success": True,
+            "doc_id": doc_id,
+            "tags": req.tags,
+            "category_id": req.category_id
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"设置文档标签失败: {e}")
+        raise HTTPException(status_code=500, detail=f"设置文档标签失败: {str(e)}")
+
+
+@router.get(
+    "/documents/{doc_id}/tags",
+    summary="获取文档分类和标签",
+    tags=["categories"]
+)
+async def get_document_tags(doc_id: str):
+    """获取文档的分类和标签"""
+    try:
+        es = ElasticsearchClient()
+
+        resp = es.client.search(
+            index=config.ES_INDEX_NAME,
+            body={
+                "size": 1,
+                "query": {
+                    "bool": {
+                        "should": [
+                            {"term": {"doc_id": doc_id}},
+                            {"prefix": {"doc_id": doc_id}}
+                        ]
+                    }
+                },
+                "_source": ["tags", "category_id", "doc_id"]
+            }
+        )
+
+        hits = resp["hits"]["hits"]
+        if not hits:
+            raise HTTPException(status_code=404, detail=f"文档不存在: {doc_id}")
+
+        src = hits[0]["_source"]
+        return {
+            "doc_id": src.get("doc_id", doc_id),
+            "tags": src.get("tags", []),
+            "category_id": src.get("category_id")
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取文档标签失败: {e}")
+        raise HTTPException(status_code=500, detail=f"获取文档标签失败: {str(e)}")
+
+
+def _update_category_doc_count(es, cat_id: str):
+    """更新分类的文档计数"""
+    try:
+        count_resp = es.client.count(
+            index=config.ES_INDEX_NAME,
+            body={"query": {"term": {"category_id": cat_id}}}
+        )
+        count = count_resp.get("count", 0)
+        es.client.update(
+            index=config.CATEGORY_INDEX_NAME,
+            id=cat_id,
+            body={"doc": {"doc_count": count}},
+            refresh=True
+        )
+    except Exception as e:
+        logger.warning(f"更新分类计数失败: {e}")

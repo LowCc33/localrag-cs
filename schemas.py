@@ -39,7 +39,8 @@ class AskRequest(BaseModel):
         "question": "雇主责任险和工伤保险有什么区别？",
         "top_k": 10,
         "rerank_top_k": 3,
-        "index_name": "cs_knowledge_base"
+        "index_name": "cs_knowledge_base",
+        "session_id": "123e4567-e89b-12d3-a456-426614174000"
     }
     """
     question: str = Field(
@@ -63,6 +64,10 @@ class AskRequest(BaseModel):
     index_name: str = Field(
         default="cs_knowledge_base",
         description="ES索引名称"
+    )
+    session_id: Optional[str] = Field(
+        default=None,
+        description="会话ID，传此参数时问答结果会写入会话历史"
     )
 
 
@@ -112,3 +117,54 @@ class HealthCheckResponse(BaseModel):
             "llm": {"status": "ok", "latency_ms": 22.3}
         }
     )
+
+
+# ========== 会话管理模型 ==========
+
+
+class SessionCreateResponse(BaseModel):
+    """创建会话响应模型"""
+    session_id: str = Field(..., description="会话ID")
+    created_at: str = Field(..., description="创建时间")
+    ttl_hours: int = Field(default=24, description="过期时间（小时）")
+
+
+class SessionHistoryResponse(BaseModel):
+    """会话历史响应模型"""
+    session_id: str = Field(..., description="会话ID")
+    history: List[dict] = Field(default=[], description="历史消息列表")
+    total_messages: int = Field(..., description="消息总数")
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str = Field(..., description="最后更新时间")
+
+
+class SessionClearResponse(BaseModel):
+    """清空会话响应模型"""
+    session_id: str = Field(..., description="会话ID")
+    cleared: bool = Field(..., description="是否清空成功")
+    cleared_at: str = Field(..., description="清空时间")
+    remaining_messages: int = Field(..., description="剩余消息数")
+
+
+class SessionDeleteResponse(BaseModel):
+    """删除会话响应模型"""
+    session_id: str = Field(..., description="会话ID")
+    deleted: bool = Field(..., description="是否删除成功")
+    deleted_at: str = Field(..., description="删除时间")
+
+
+class SessionListItem(BaseModel):
+    """会话列表项模型"""
+    id: str = Field(..., description="会话ID")
+    title: str = Field(..., description="会话标题")
+    created_at: str = Field(..., description="创建时间")
+    updated_at: str = Field(..., description="最后更新时间")
+    message_count: int = Field(..., description="消息数量")
+
+
+class SessionListResponse(BaseModel):
+    """会话列表响应模型"""
+    total: int = Field(..., description="总会话数")
+    sessions: List[SessionListItem] = Field(default=[], description="会话列表")
+    limit: int = Field(..., description="每页限制")
+    offset: int = Field(..., description="偏移量")

@@ -207,3 +207,19 @@ SUPPORTED_EXTENSIONS = tuple(
     ).split(',')
     if ext.strip()
 )
+
+# ========== 分类/标签管理配置 ==========
+# -----------------------------------------------------------------------------
+# 分类索引名称
+CATEGORY_INDEX_NAME = os.getenv('CATEGORY_INDEX_NAME', 'cs_knowledge_categories')
+# 分类索引Mapping
+CATEGORY_INDEX_MAPPING = {
+    "properties": {
+        "cat_id": {"type": "keyword"},
+        "name": {"type": "keyword"},
+        "description": {"type": "text", "analyzer": "standard"},
+        "color": {"type": "keyword"},
+        "created_at": {"type": "date"},
+        "doc_count": {"type": "integer"}
+    }
+}

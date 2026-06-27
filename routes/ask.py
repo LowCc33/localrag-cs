@@ -39,6 +39,9 @@ import config
 # 设计原则：缓存层作为独立模块插入主流程，Redis 不可用时全部降级 None
 from core import cache as cache_service
 
+# 导入会话管理器
+from session_manager import session_manager
+
 router = APIRouter(tags=["ask"])
 
 
@@ -76,7 +79,24 @@ async def ask_endpoint(
     total_start = time.perf_counter()
     
     try:
-        # ========== 阶段0: 查缓存（任务 localrag-redis-cache 接入点） ==========
+        # ========== 阶段0: 会话历史处理 ==========
+        # 如果传了 session_id，获取历史消息构建上下文
+        session_context = ""
+        if request.session_id:
+            try:
+                history = session_manager.get_history(request.session_id, limit=16)
+                if history:
+                    # 将历史消息格式化为上下文
+                    history_lines = []
+                    for msg in history:
+                        role_name = "用户" if msg["role"] == "user" else "助手"
+                        history_lines.append(f"{role_name}: {msg['content']}")
+                    session_context = "\n".join(history_lines)
+                    logger.debug(f"会话 {request.session_id}: 加载 {len(history)} 条历史消息")
+            except Exception as e:
+                logger.warning(f"加载会话历史失败: {e}")
+        
+        # ========== 阶段0.5: 查缓存（任务 localrag-redis-cache 接入点） ==========
         # 命中直接返回，绕过检索 + 重排 + LLM 三阶段，毫秒级响应
         # 未命中走原流程，并在最后写回缓存
         cached = cache_service.get_cache(request.question)
@@ -240,6 +260,23 @@ async def ask_endpoint(
                 answer=answer,
                 sources=[s.model_dump() for s in source_docs],
             )
+
+        # ========== 写入会话历史 ==========
+        if request.session_id:
+            try:
+                # 写入用户问题
+                session_manager.add_message(request.session_id, "user", request.question)
+                # 写入助手回答
+                session_manager.add_message(request.session_id, "assistant", answer)
+                # 如果是该会话的第一条消息，自动设置标题
+                msg_count = session_manager.get_message_count(request.session_id)
+                if msg_count <= 2:  # 只有 user+assistant 两条
+                    title = request.question[:50]
+                    if len(request.question) > 50:
+                        title += "..."
+                    session_manager.update_session_title(request.session_id, title)
+            except Exception as e:
+                logger.warning(f"写入会话历史失败: {e}")
 
         # ========== 组装响应 ==========
         return AskResponse(

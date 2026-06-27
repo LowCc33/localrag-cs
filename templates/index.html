@@ -180,9 +180,62 @@
                 </div>
             </div>
         </div>
-        <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-            <!-- 左侧：输入区域 -->
-            <div class="space-y-6">
+        <!-- 会话列表 + 问答区域 双栏布局 -->
+        <div class="flex gap-6">
+            <!-- 左侧：会话列表面板 -->
+            <div id="session-panel" class="w-72 flex-shrink-0 hidden lg:block">
+                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden sticky top-8">
+                    <!-- 会话列表头部 -->
+                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
+                        <h3 class="text-sm font-semibold text-gray-800 flex items-center gap-2">
+                            <i class="fas fa-comments text-blue-500"></i>
+                            会话列表
+                        </h3>
+                        <button id="new-session-btn" class="text-xs px-2.5 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
+                            <i class="fas fa-plus mr-1"></i>新建
+                        </button>
+                    </div>
+                    <!-- 会话列表 -->
+                    <div id="session-list" class="overflow-y-auto" style="max-height: calc(100vh - 280px);">
+                        <div class="text-center text-gray-400 py-8 text-sm">
+                            <i class="fas fa-spinner fa-spin text-lg mb-2"></i>
+                            <p>加载中...</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 移动端：会话列表切换按钮 -->
+            <div class="lg:hidden mb-4">
+                <button id="mobile-session-toggle" class="w-full px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">
+                    <i class="fas fa-comments"></i>
+                    <span id="mobile-session-label">会话列表</span>
+                    <i class="fas fa-chevron-down text-xs"></i>
+                </button>
+                <!-- 移动端会话列表下拉 -->
+                <div id="mobile-session-dropdown" class="hidden mt-2 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                    <div id="mobile-session-list" class="max-h-60 overflow-y-auto">
+                        <div class="text-center text-gray-400 py-4 text-sm">加载中...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：问答区域 -->
+            <div class="flex-1 min-w-0">
+                <!-- 当前会话标识 -->
+                <div id="current-session-bar" class="hidden bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-3 mb-4 flex items-center justify-between">
+                    <div class="flex items-center gap-2 text-sm text-gray-600">
+                        <i class="fas fa-hashtag text-blue-400"></i>
+                        <span id="current-session-title" class="font-medium text-gray-800">新会话</span>
+                    </div>
+                    <button id="clear-session-btn" class="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors">
+                        <i class="fas fa-eraser mr-1"></i>清空
+                    </button>
+                </div>
+                
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
+                    <!-- 左侧：输入区域 -->
+                    <div class="space-y-6">
                 <!-- 问题输入卡片 -->
                 <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
                     <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
@@ -331,6 +384,7 @@
                     <p class="text-gray-500 max-w-md mx-auto">在左侧输入框中输入您的问题，点击"开始问答"按钮，系统将自动检索知识库并生成答案。</p>
                 </div>
             </div>
+        </div>
         </div>
     </main>
 
@@ -644,7 +698,8 @@
                 question: question,
                 top_k: topK,
                 rerank_top_k: rerankTopK,
-                index_name: indexName
+                index_name: indexName,
+                session_id: state.currentSessionId || undefined
             };
 
             try {
@@ -770,6 +825,261 @@
             }
         }
         
+        // ============ 会话管理 ============
+        
+        // 当前会话ID
+        state.currentSessionId = localStorage.getItem('lastSessionId') || null;
+        
+        // 加载会话列表
+        async function loadSessions() {
+            try {
+                const resp = await fetch(`${state.apiBaseUrl}/api/sessions?limit=50`);
+                if (!resp.ok) throw new Error('加载失败');
+                const data = await resp.json();
+                renderSessionList(data.sessions || []);
+                renderMobileSessionList(data.sessions || []);
+            } catch (e) {
+                document.getElementById('session-list').innerHTML = `
+                    <div class="text-center text-gray-400 py-8 text-sm">
+                        <i class="fas fa-exclamation-triangle text-lg mb-2"></i>
+                        <p>加载失败</p>
+                    </div>
+                `;
+            }
+        }
+        
+        // 渲染会话列表
+        function renderSessionList(sessions) {
+            const el = document.getElementById('session-list');
+            if (!sessions.length) {
+                el.innerHTML = `
+                    <div class="text-center text-gray-400 py-8 text-sm">
+                        <i class="fas fa-inbox text-lg mb-2"></i>
+                        <p>暂无会话</p>
+                        <p class="text-xs mt-1">开始问答后自动创建</p>
+                    </div>
+                `;
+                return;
+            }
+            
+            el.innerHTML = sessions.map(s => {
+                const isActive = s.id === state.currentSessionId;
+                const timeAgo = formatTimeAgo(s.updated_at);
+                return `
+                    <div class="session-item px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${isActive ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}" 
+                         data-session-id="${s.id}">
+                        <div class="flex items-start justify-between">
+                            <div class="flex-1 min-w-0">
+                                <p class="text-sm font-medium text-gray-800 truncate">${escapeHtml(s.title)}</p>
+                                <div class="flex items-center gap-2 text-xs text-gray-400 mt-1">
+                                    <span>${timeAgo}</span>
+                                    <span>·</span>
+                                    <span>${s.message_count} 条</span>
+                                </div>
+                            </div>
+                            <button class="delete-session-btn ml-2 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors flex-shrink-0"
+                                    data-session-id="${s.id}" title="删除会话">
+                                <i class="fas fa-trash-alt text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            // 绑定点击事件
+            el.querySelectorAll('.session-item').forEach(item => {
+                item.addEventListener('click', (e) => {
+                    if (e.target.closest('.delete-session-btn')) return;
+                    switchSession(item.dataset.sessionId);
+                });
+            });
+            
+            // 绑定删除事件
+            el.querySelectorAll('.delete-session-btn').forEach(btn => {
+                btn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    deleteSession(btn.dataset.sessionId);
+                });
+            });
+        }
+        
+        // 渲染移动端会话列表
+        function renderMobileSessionList(sessions) {
+            const el = document.getElementById('mobile-session-list');
+            if (!sessions.length) {
+                el.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">暂无会话</div>';
+                return;
+            }
+            
+            el.innerHTML = sessions.map(s => {
+                const isActive = s.id === state.currentSessionId;
+                return `
+                    <div class="mobile-session-item px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${isActive ? 'bg-blue-50' : ''}"
+                         data-session-id="${s.id}">
+                        <p class="text-sm font-medium text-gray-800 truncate">${escapeHtml(s.title)}</p>
+                        <p class="text-xs text-gray-400 mt-0.5">${formatTimeAgo(s.updated_at)} · ${s.message_count} 条</p>
+                    </div>
+                `;
+            }).join('');
+            
+            el.querySelectorAll('.mobile-session-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    switchSession(item.dataset.sessionId);
+                    document.getElementById('mobile-session-dropdown').classList.add('hidden');
+                });
+            });
+        }
+        
+        // 格式化相对时间
+        function formatTimeAgo(dateStr) {
+            if (!dateStr) return '未知';
+            try {
+                const date = new Date(dateStr);
+                const now = new Date();
+                const diff = Math.floor((now - date) / 1000);
+                if (diff < 60) return '刚刚';
+                if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
+                if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
+                if (diff < 604800) return `${Math.floor(diff / 86400)}天前`;
+                return date.toLocaleDateString('zh-CN');
+            } catch (e) {
+                return dateStr;
+            }
+        }
+        
+        // 切换会话
+        async function switchSession(sessionId) {
+            state.currentSessionId = sessionId;
+            localStorage.setItem('lastSessionId', sessionId);
+            
+            // 更新UI
+            document.querySelectorAll('.session-item').forEach(el => {
+                el.classList.remove('bg-blue-50', 'border-l-2', 'border-l-blue-500');
+                if (el.dataset.sessionId === sessionId) {
+                    el.classList.add('bg-blue-50', 'border-l-2', 'border-l-blue-500');
+                }
+            });
+            
+            // 显示当前会话标识
+            showCurrentSessionBar();
+            
+            // 加载历史消息
+            try {
+                const resp = await fetch(`${state.apiBaseUrl}/api/session/${sessionId}/history`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    // 更新会话标题
+                    const sessionInfo = await fetch(`${state.apiBaseUrl}/api/sessions?limit=1`).then(r => r.json());
+                    const sessions = sessionInfo.sessions || [];
+                    const current = sessions.find(s => s.id === sessionId);
+                    if (current) {
+                        document.getElementById('current-session-title').textContent = current.title;
+                    }
+                    
+                    // 清空并显示历史消息
+                    clearAnswer();
+                    if (data.history && data.history.length > 0) {
+                        hideInitialState();
+                        showResultCards();
+                        // 显示历史对话
+                        let historyText = '';
+                        data.history.forEach(msg => {
+                            const prefix = msg.role === 'user' ? '👤 用户: ' : '🤖 助手: ';
+                            historyText += prefix + msg.content + '\n\n';
+                        });
+                        renderAnswer(historyText);
+                        renderSources([]);
+                    } else {
+                        // 空会话，清空结果区域
+                        elements.answerCard.classList.add('hidden');
+                        elements.sourcesCard.classList.add('hidden');
+                        elements.latencyCard.classList.add('hidden');
+                        elements.initialState.classList.remove('hidden');
+                    }
+                }
+            } catch (e) {
+                console.warn('加载历史失败:', e);
+            }
+            
+            // 刷新列表
+            loadSessions();
+        }
+        
+        // 显示当前会话标识
+        function showCurrentSessionBar() {
+            const bar = document.getElementById('current-session-bar');
+            bar.classList.remove('hidden');
+        }
+        
+        // 创建新会话
+        async function createNewSession() {
+            try {
+                const resp = await fetch(`${state.apiBaseUrl}/api/session/new`, { method: 'POST' });
+                if (!resp.ok) throw new Error('创建失败');
+                const data = await resp.json();
+                state.currentSessionId = data.session_id;
+                localStorage.setItem('lastSessionId', data.session_id);
+                
+                // 清空对话区域
+                clearAnswer();
+                elements.answerCard.classList.add('hidden');
+                elements.sourcesCard.classList.add('hidden');
+                elements.latencyCard.classList.add('hidden');
+                elements.initialState.classList.remove('hidden');
+                elements.questionInput.value = '';
+                
+                // 更新UI
+                document.getElementById('current-session-title').textContent = '新会话';
+                showCurrentSessionBar();
+                
+                // 刷新列表
+                loadSessions();
+            } catch (e) {
+                console.error('创建会话失败:', e);
+            }
+        }
+        
+        // 删除会话
+        async function deleteSession(sessionId) {
+            if (!confirm('确定要删除此会话吗？此操作不可撤销。')) return;
+            try {
+                const resp = await fetch(`${state.apiBaseUrl}/api/session/${sessionId}`, { method: 'DELETE' });
+                if (!resp.ok) throw new Error('删除失败');
+                
+                // 如果删除的是当前会话，清空状态
+                if (sessionId === state.currentSessionId) {
+                    state.currentSessionId = null;
+                    localStorage.removeItem('lastSessionId');
+                    clearAnswer();
+                    elements.answerCard.classList.add('hidden');
+                    elements.sourcesCard.classList.add('hidden');
+                    elements.latencyCard.classList.add('hidden');
+                    elements.initialState.classList.remove('hidden');
+                    document.getElementById('current-session-bar').classList.add('hidden');
+                }
+                
+                loadSessions();
+            } catch (e) {
+                alert('删除失败: ' + e.message);
+            }
+        }
+        
+        // 清空当前会话
+        async function clearCurrentSession() {
+            if (!state.currentSessionId) return;
+            if (!confirm('确定要清空当前会话的所有消息吗？')) return;
+            try {
+                await fetch(`${state.apiBaseUrl}/api/session/${state.currentSessionId}/clear`, { method: 'POST' });
+                clearAnswer();
+                elements.answerCard.classList.add('hidden');
+                elements.sourcesCard.classList.add('hidden');
+                elements.latencyCard.classList.add('hidden');
+                elements.initialState.classList.remove('hidden');
+            } catch (e) {
+                alert('清空失败: ' + e.message);
+            }
+        }
+        
         // ============ 初始化 ============
         
         // 页面加载完成后执行
@@ -787,6 +1097,28 @@
             // 首屏拉一次缓存统计，并每 15 秒自动刷新（演示中能看到数字变化）
             refreshCacheStats();
             setInterval(refreshCacheStats, 15000);
+            
+            // ===== 会话管理初始化 =====
+            
+            // 加载会话列表
+            loadSessions();
+            
+            // 新建会话
+            document.getElementById('new-session-btn').addEventListener('click', createNewSession);
+            
+            // 清空当前会话
+            document.getElementById('clear-session-btn').addEventListener('click', clearCurrentSession);
+            
+            // 移动端会话列表切换
+            document.getElementById('mobile-session-toggle').addEventListener('click', function() {
+                const dropdown = document.getElementById('mobile-session-dropdown');
+                dropdown.classList.toggle('hidden');
+            });
+            
+            // 如果有上次的会话ID，自动加载
+            if (state.currentSessionId) {
+                switchSession(state.currentSessionId);
+            }
         });
     </script>
 </body>
