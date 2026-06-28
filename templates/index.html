@@ -3,732 +3,801 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LocalRAG-CS 客服知识库问答系统</title>
+    <title>LocalRAG-CS 智能问答</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Awesome图标库 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- 自定义样式 -->
     <style>
-        /* 自定义滚动条 */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
-        }
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb {
-            background: #c1c1c1;
-            border-radius: 4px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #a8a8a8;
-        }
-        
-        /* 加载动画 */
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
-        }
-        .animate-pulse-fast {
-            animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
-        
-        /* 文档卡片悬停效果 */
-        .doc-card {
-            transition: all 0.2s ease-in-out;
-        }
-        .doc-card:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
-        }
-        
-        /* 代码块样式 */
-        .code-block {
-            background: #1e293b;
-            color: #e2e8f0;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            overflow-x: auto;
-            font-family: 'Courier New', monospace;
-            font-size: 0.875rem;
+        /* ============ 全局 ============ */
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
 
-        /* ============ 缓存徽章样式（任务 localrag-redis-cache 步骤E） ============ */
-        /* HIT 绿色徽章 #52C41A，MISS 灰色 #BFBFBF，演示视频里一眼可见 */
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4a4a6c; }
+
+        /* ============ 顶栏 ============ */
+        .topbar {
+            background: #1e1e2e;
+            border-bottom: 1px solid #2a2a4a;
+            padding: 0 20px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+        .topbar-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .topbar-logo .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #6c63ff, #7c6fff);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 16px;
+            color: #fff;
+        }
+        .topbar-logo .logo-text {
+            font-size: 16px;
+            font-weight: 700;
+            color: #e0e0e0;
+            letter-spacing: 0.5px;
+        }
+        .topbar-logo .logo-sub {
+            font-size: 11px;
+            color: #7a7a9a;
+            margin-left: 4px;
+        }
+
+        /* ============ 对话区 ============ */
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 0;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-area::-webkit-scrollbar { width: 6px; }
+        .chat-area::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 3px; }
+
+        .chat-container {
+            max-width: 800px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 0 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ============ 消息 ============ */
+        .msg-row {
+            display: flex;
+            margin-bottom: 24px;
+            animation: fadeIn 0.3s ease;
+        }
+        .msg-row-user { justify-content: flex-end; }
+        .msg-row-ai { justify-content: flex-start; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .msg-bubble {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            line-height: 1.6;
+            font-size: 14px;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        .msg-bubble-user {
+            background: #2d2d5e;
+            color: #e0e0e0;
+            border-bottom-right-radius: 4px;
+        }
+        .msg-bubble-ai {
+            background: transparent;
+            color: #e0e0e0;
+            padding: 4px 0;
+        }
+
+        .msg-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+            flex-shrink: 0;
+            margin-right: 10px;
+        }
+        .msg-avatar-ai {
+            background: linear-gradient(135deg, #6c63ff, #7c6fff);
+            color: #fff;
+        }
+
+        .msg-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .msg-role-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #9e9e9e;
+        }
+
+        /* ============ 答案底部信息 ============ */
+        .answer-footer {
+            margin-top: 12px;
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+            font-size: 11px;
+            color: #7a7a9a;
+        }
+        .answer-footer .latency-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .answer-footer .latency-item i {
+            font-size: 10px;
+        }
+        .source-toggle-btn {
+            font-size: 11px;
+            color: #6c63ff;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 2px 8px;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }
+        .source-toggle-btn:hover {
+            background: rgba(108, 99, 255, 0.1);
+        }
+
+        /* ============ 来源折叠面板 ============ */
+        .sources-panel {
+            margin-top: 8px;
+            border-left: 2px solid #2a2a4a;
+            padding-left: 12px;
+        }
+        .source-item {
+            padding: 8px 10px;
+            margin-bottom: 6px;
+            background: #1e1e2e;
+            border-radius: 8px;
+            border: 1px solid #2a2a4a;
+            font-size: 12px;
+        }
+        .source-item .source-title {
+            font-weight: 600;
+            color: #c0c0e0;
+        }
+        .source-item .source-content {
+            color: #9e9e9e;
+            margin-top: 4px;
+            display: -webkit-box;
+            -webkit-line-clamp: 2;
+            -webkit-box-orient: vertical;
+            overflow: hidden;
+        }
+        .source-item .source-score {
+            font-size: 10px;
+            color: #7a7a9a;
+            margin-top: 4px;
+        }
+
+        /* ============ 缓存徽章 ============ */
         .cache-badge {
             display: inline-flex;
             align-items: center;
-            gap: 6px;
-            padding: 4px 12px;
+            gap: 4px;
+            padding: 2px 8px;
             border-radius: 9999px;
-            font-size: 0.85rem;
+            font-size: 10px;
             font-weight: 700;
-            letter-spacing: 0.3px;
-            color: #ffffff;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            color: #fff;
         }
-        .cache-badge-hit {
-            background-color: #52C41A;
-        }
-        .cache-badge-miss {
-            background-color: #BFBFBF;
-        }
+        .cache-badge-hit { background: #2d6a4f; }
+        .cache-badge-miss { background: #5a5a7a; }
         .cache-badge .dot {
-            width: 8px;
-            height: 8px;
+            width: 6px; height: 6px;
             border-radius: 50%;
-            background: #ffffff;
-            box-shadow: 0 0 0 2px rgba(255,255,255,0.4);
+            background: #fff;
         }
 
-        /* 缓存统计小卡（顶部条） */
-        .cache-stat-card {
-            background: linear-gradient(135deg, #ecfdf5 0%, #ecfeff 100%);
-            border: 1px solid #d1fae5;
+        /* ============ 输入区 ============ */
+        .input-area {
+            background: #1e1e2e;
+            border-top: 1px solid #2a2a4a;
+            padding: 12px 20px 16px;
+            flex-shrink: 0;
         }
-        .cache-stat-num {
-            font-size: 1.25rem;
-            font-weight: 700;
-            color: #047857;
-            line-height: 1;
+        .input-container {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            background: #2a2a4a;
+            border-radius: 16px;
+            padding: 8px 12px;
+            border: 1px solid #3a3a5c;
+            transition: border-color 0.2s;
         }
-        .cache-stat-label {
-            font-size: 0.7rem;
-            color: #6b7280;
-            margin-top: 2px;
+        .input-container:focus-within {
+            border-color: #6c63ff;
         }
+        .input-container textarea {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #e0e0e0;
+            font-size: 14px;
+            line-height: 1.5;
+            resize: none;
+            max-height: 120px;
+            padding: 4px 0;
+            font-family: inherit;
+        }
+        .input-container textarea::placeholder {
+            color: #5a5a7a;
+        }
+        .input-container .send-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #6c63ff;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.2s, opacity 0.2s;
+        }
+        .input-container .send-btn:hover { background: #7c6fff; }
+        .input-container .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .input-container .send-btn i { font-size: 14px; }
+
+        /* 齿轮按钮 */
+        .gear-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: transparent;
+            color: #5a5a7a;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: color 0.2s, background 0.2s;
+        }
+        .gear-btn:hover { color: #9e9e9e; background: rgba(255,255,255,0.05); }
+
+        /* ============ 参数面板（齿轮弹出） ============ */
+        .params-panel {
+            max-width: 800px;
+            margin: 0 auto 8px;
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 12px;
+            padding: 12px 16px;
+            display: none;
+        }
+        .params-panel.open { display: block; }
+        .params-panel .param-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 8px;
+        }
+        .params-panel .param-row:last-child { margin-bottom: 0; }
+        .params-panel label {
+            font-size: 12px;
+            color: #9e9e9e;
+            min-width: 70px;
+            flex-shrink: 0;
+        }
+        .params-panel input, .params-panel select {
+            background: #1e1e2e;
+            border: 1px solid #3a3a5c;
+            border-radius: 6px;
+            padding: 4px 8px;
+            color: #e0e0e0;
+            font-size: 12px;
+            outline: none;
+            width: 80px;
+        }
+        .params-panel input:focus, .params-panel select:focus {
+            border-color: #6c63ff;
+        }
+
+        /* ============ 空状态 ============ */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #5a5a7a;
+            text-align: center;
+            padding: 40px 20px;
+        }
+        .empty-state .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.6;
+        }
+        .empty-state h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #9e9e9e;
+            margin-bottom: 8px;
+        }
+        .empty-state p {
+            font-size: 13px;
+            color: #5a5a7a;
+            max-width: 400px;
+        }
+
+        /* ============ 打字光标 ============ */
+        .typing-cursor::after {
+            content: '▊';
+            animation: blink 1s step-end infinite;
+            color: #6c63ff;
+        }
+        @keyframes blink {
+            50% { opacity: 0; }
+        }
+
+        /* ============ 加载中动画（AI 等待） ============ */
+        .thinking-dots {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 0;
+        }
+        .thinking-dots span {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #6c63ff;
+            animation: dotPulse 1.4s infinite ease-in-out both;
+        }
+        .thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
+        .thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
+        .thinking-dots span:nth-child(3) { animation-delay: 0s; }
+        @keyframes dotPulse {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* ============ 导出下拉 ============ */
+        .export-dropdown {
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 12px;
+            padding: 12px;
+            min-width: 240px;
+        }
+        .export-dropdown .export-label {
+            font-size: 11px;
+            color: #7a7a9a;
+            margin-bottom: 6px;
+        }
+        .export-dropdown .export-path-display {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 10px;
+            background: #1e1e2e;
+            border: 1px solid #3a3a5c;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 12px;
+            color: #9e9e9e;
+            transition: border-color 0.2s;
+        }
+        .export-dropdown .export-path-display:hover { border-color: #6c63ff; }
+        .export-dropdown .export-btns {
+            display: flex;
+            gap: 6px;
+            margin-top: 8px;
+        }
+        .export-dropdown .export-btns button {
+            flex: 1;
+            padding: 6px 10px;
+            border-radius: 8px;
+            border: 1px solid #3a3a5c;
+            background: transparent;
+            color: #c0c0e0;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .export-dropdown .export-btns button:hover { background: rgba(108,99,255,0.1); }
+
+        /* ============ 目录树（导出路径） ============ */
+        .path-tree {
+            background: #1e1e2e;
+            border: 1px solid #3a3a5c;
+            border-radius: 8px;
+            margin-top: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            display: none;
+        }
+        .path-tree.open { display: block; }
+        .path-tree .tree-item {
+            padding: 4px 8px;
+            font-size: 11px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: #c0c0e0;
+            border-radius: 4px;
+            transition: background 0.15s;
+        }
+        .path-tree .tree-item:hover { background: rgba(108,99,255,0.1); }
+        .path-tree .tree-arrow { color: #5a5a7a; width: 12px; text-align: center; font-size: 9px; }
+        .path-tree .tree-children { padding-left: 14px; }
+        .path-tree .tree-section-label {
+            font-size: 9px;
+            color: #5a5a7a;
+            padding: 4px 8px 2px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        .path-tree .tree-manual-input {
+            display: flex;
+            gap: 4px;
+            padding: 4px 8px;
+        }
+        .path-tree .tree-manual-input input {
+            flex: 1;
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 4px;
+            padding: 2px 6px;
+            color: #e0e0e0;
+            font-size: 10px;
+            outline: none;
+        }
+        .path-tree .tree-manual-input button {
+            padding: 2px 8px;
+            background: #6c63ff;
+            color: #fff;
+            border: none;
+            border-radius: 4px;
+            font-size: 10px;
+            cursor: pointer;
+        }
+
+        /* ============ 顶部按钮 ============ */
+        .topbar-btn {
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            border: 1px solid #3a3a5c;
+            background: transparent;
+            color: #9e9e9e;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .topbar-btn:hover {
+            border-color: #6c63ff;
+            color: #c0c0e0;
+        }
+        .topbar-btn-primary {
+            background: #6c63ff;
+            color: #fff;
+            border-color: #6c63ff;
+        }
+        .topbar-btn-primary:hover {
+            background: #7c6fff;
+        }
+
+        /* ============ 缓存统计（齿轮面板内） ============ */
+        .cache-stat-inline {
+            margin-top: 8px;
+            padding-top: 8px;
+            border-top: 1px solid #3a3a5c;
+        }
+        .cache-stat-inline .stat-row {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            font-size: 11px;
+            color: #7a7a9a;
+        }
+        .cache-stat-inline .stat-row span {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .cache-stat-inline .stat-row .num {
+            color: #c0c0e0;
+            font-weight: 600;
+        }
+        .cache-stat-inline .flush-btn {
+            font-size: 10px;
+            color: #e74c3c;
+            cursor: pointer;
+            background: none;
+            border: none;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+        .cache-stat-inline .flush-btn:hover { background: rgba(231,76,60,0.1); }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <!-- 顶部导航栏 -->
-    <nav class="bg-white shadow-sm border-b border-gray-200">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <div class="flex justify-between h-16 items-center">
-                <!-- 左侧：标题和副标题 -->
-                <div class="flex items-center gap-3">
-                    <!-- Logo图标 -->
-                    <div class="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center text-white font-bold text-lg">
-                        R
-                    </div>
-                    <div>
-                        <h1 class="text-xl font-bold text-gray-900 whitespace-nowrap">LocalRAG-CS</h1>
-                        <p class="text-xs text-gray-500 whitespace-nowrap">客服知识库问答系统</p>
-                    </div>
-                </div>
-                
-                <!-- 右侧：导航按钮 -->
-                <div class="flex items-center space-x-2" style="white-space: nowrap;">
-                    <a href="/ingest" class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors whitespace-nowrap">
-                        <i class="fas fa-upload mr-2"></i>知识库管理
-                    </a>
-                    <a href="/docs" target="_blank" class="text-gray-500 hover:text-blue-600 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap">
-                        API文档
-                    </a>
-                    <a href="/api/health" target="_blank" class="text-gray-500 hover:text-green-600 px-3 py-2 rounded-md text-sm font-medium transition-colors whitespace-nowrap">
-                        健康检查
-                    </a>
-                    <div id="status-indicator" class="flex items-center gap-2 px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm font-medium whitespace-nowrap">
-                        <div class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
-                        运行中
-                    </div>
-                </div>
-            </div>
-        </div>
-    </nav>
+<body>
 
-    <!-- 主内容区域 -->
-    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <!-- 缓存性能统计卡（顶部条，任务 localrag-redis-cache 步骤E） -->
-        <div id="cache-stat-bar" class="cache-stat-card rounded-xl px-5 py-3 mb-6 shadow-sm">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-                <div class="flex items-center gap-2">
-                    <span class="text-lg">⚡</span>
-                    <span class="font-semibold text-gray-800 text-sm">Redis 热点缓存性能</span>
-                    <span id="cache-availability" class="text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600">检测中…</span>
-                </div>
-                <div class="flex flex-wrap items-center gap-4 sm:gap-6">
-                    <div class="text-center">
-                        <div id="stat-total" class="cache-stat-num">0</div>
-                        <div class="cache-stat-label">总查询</div>
-                    </div>
-                    <div class="text-center">
-                        <div id="stat-hit" class="cache-stat-num" style="color:#16a34a">0</div>
-                        <div class="cache-stat-label">HIT</div>
-                    </div>
-                    <div class="text-center">
-                        <div id="stat-miss" class="cache-stat-num" style="color:#6b7280">0</div>
-                        <div class="cache-stat-label">MISS</div>
-                    </div>
-                    <div class="text-center">
-                        <div id="stat-hitrate" class="cache-stat-num">0%</div>
-                        <div class="cache-stat-label">命中率</div>
-                    </div>
-                    <div class="text-center">
-                        <div id="stat-avg-hit" class="cache-stat-num" style="color:#047857">- ms</div>
-                        <div class="cache-stat-label">HIT 平均</div>
-                    </div>
-                    <div class="text-center">
-                        <div id="stat-avg-miss" class="cache-stat-num" style="color:#6b7280">- ms</div>
-                        <div class="cache-stat-label">MISS 平均</div>
-                    </div>
-                    <button onclick="flushCacheAction()" class="text-xs px-3 py-1.5 rounded border border-red-200 text-red-600 hover:bg-red-50 transition-colors">
-                        清空缓存
-                    </button>
-                </div>
-            </div>
+    <!-- ============ 顶栏 ============ -->
+    <header class="topbar">
+        <div class="topbar-logo">
+            <div class="logo-icon">R</div>
+            <span class="logo-text">LocalRAG-CS</span>
+            <span class="logo-sub">智能问答</span>
         </div>
-        <!-- 会话列表 + 问答区域 双栏布局 -->
-        <div class="flex gap-6">
-            <!-- 左侧：会话列表面板 -->
-            <div id="session-panel" class="w-72 flex-shrink-0 hidden lg:block">
-                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden sticky top-8">
-                    <!-- 会话列表头部 -->
-                    <div class="px-4 py-3 border-b border-gray-100 bg-gray-50 flex items-center justify-between">
-                        <h3 class="text-sm font-semibold text-gray-800 flex items-center gap-2">
-                            <i class="fas fa-comments text-blue-500"></i>
-                            会话列表
-                        </h3>
-                        <button id="new-session-btn" class="text-xs px-2.5 py-1.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors">
-                            <i class="fas fa-plus mr-1"></i>新建
-                        </button>
-                    </div>
-                    <!-- 会话列表 -->
-                    <div id="session-list" class="overflow-y-auto" style="max-height: calc(100vh - 280px);">
-                        <div class="text-center text-gray-400 py-8 text-sm">
-                            <i class="fas fa-spinner fa-spin text-lg mb-2"></i>
-                            <p>加载中...</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-            
-            <!-- 移动端：会话列表切换按钮 -->
-            <div class="lg:hidden mb-4">
-                <button id="mobile-session-toggle" class="w-full px-4 py-2 bg-white border border-gray-200 rounded-lg text-sm text-gray-700 hover:bg-gray-50 transition-colors flex items-center justify-center gap-2">
-                    <i class="fas fa-comments"></i>
-                    <span id="mobile-session-label">会话列表</span>
-                    <i class="fas fa-chevron-down text-xs"></i>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <button class="topbar-btn" onclick="window.location.href='/ingest'">
+                <i class="fas fa-database"></i>知识库管理
+            </button>
+            <div class="relative" id="export-dropdown-container">
+                <button id="export-btn" class="topbar-btn" title="导出报告">
+                    <i class="fas fa-download"></i>导出
                 </button>
-                <!-- 移动端会话列表下拉 -->
-                <div id="mobile-session-dropdown" class="hidden mt-2 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
-                    <div id="mobile-session-list" class="max-h-60 overflow-y-auto">
-                        <div class="text-center text-gray-400 py-4 text-sm">加载中...</div>
+                <div id="export-dropdown" class="hidden absolute right-0 top-full mt-2 export-dropdown z-20">
+                    <div class="export-label">保存到</div>
+                    <div class="relative" id="export-path-wrapper">
+                        <div class="export-path-display" id="export-path-display">
+                            <i class="fas fa-folder text-yellow-500"></i>
+                            <span id="export-path-text" class="flex-1">浏览器下载</span>
+                            <i class="fas fa-chevron-down text-gray-500 text-[10px]"></i>
+                        </div>
+                        <div id="export-path-tree" class="path-tree">
+                            <div id="export-path-tree-content" class="py-1">
+                                <div class="text-center py-3 text-gray-500 text-xs"><i class="fas fa-spinner fa-spin"></i> 加载中...</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div id="export-path-hint" class="text-xs mt-1 hidden" style="color:#7a7a9a;"></div>
+                    <div class="export-btns">
+                        <button id="export-pdf-btn"><i class="fas fa-file-pdf text-red-400"></i> PDF</button>
+                        <button id="export-docx-btn"><i class="fas fa-file-word text-blue-400"></i> Word</button>
                     </div>
                 </div>
             </div>
+            <div id="status-indicator" style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(45,106,79,0.2);border-radius:9999px;font-size:11px;color:#52c41a;">
+                <div style="width:6px;height:6px;background:#52c41a;border-radius:50%;"></div>
+                运行中
+            </div>
+        </div>
+    </header>
 
-            <!-- 右侧：问答区域 -->
-            <div class="flex-1 min-w-0">
-                <!-- 当前会话标识 -->
-                <div id="current-session-bar" class="hidden bg-white rounded-xl shadow-sm border border-gray-200 px-5 py-3 mb-4 flex items-center justify-between">
-                    <div class="flex items-center gap-2 text-sm text-gray-600">
-                        <i class="fas fa-hashtag text-blue-400"></i>
-                        <span id="current-session-title" class="font-medium text-gray-800">新会话</span>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <div class="relative" id="export-dropdown-container">
-                            <button id="export-btn" class="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors" title="导出报告">
-                                <i class="fas fa-download mr-1"></i>导出
-                            </button>
-                            <div id="export-dropdown" class="hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-80 p-3">
-                                <div class="mb-2">
-                                    <label class="text-xs text-gray-500 block mb-1">保存到</label>
-                                    <div class="relative" id="export-path-wrapper">
-                                        <div class="flex items-center gap-1 text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg cursor-pointer hover:border-blue-300 bg-white" id="export-path-display">
-                                            <i class="fas fa-folder text-yellow-500"></i>
-                                            <span id="export-path-text" class="flex-1 text-gray-400">浏览器下载</span>
-                                            <i class="fas fa-chevron-down text-gray-300 text-[10px]"></i>
-                                        </div>
-                                        <!-- 下拉目录树 -->
-                                        <div id="export-path-tree" class="hidden absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-72 overflow-y-auto">
-                                            <div id="export-path-tree-content" class="py-1">
-                                                <div class="text-center py-3 text-gray-400 text-xs"><i class="fas fa-spinner fa-spin"></i> 加载中...</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div id="export-path-hint" class="text-xs mt-1 hidden"></div>
-                                </div>
-                                <div class="flex gap-1">
-                                    <button id="export-pdf-btn" class="flex-1 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg flex items-center justify-center gap-1.5 border border-gray-100">
-                                        <i class="fas fa-file-pdf text-red-500"></i>PDF
-                                    </button>
-                                    <button id="export-docx-btn" class="flex-1 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg flex items-center justify-center gap-1.5 border border-gray-100">
-                                        <i class="fas fa-file-word text-blue-500"></i>Word
-                                    </button>
-                                </div>
-                            </div>
-                        </div>
-                        <button id="clear-session-btn" class="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors">
-                            <i class="fas fa-eraser mr-1"></i>清空
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="grid grid-cols-1 lg:grid-cols-2 gap-8">
-                    <!-- 左侧：输入区域 -->
-                    <div class="space-y-6">
-                <!-- 问题输入卡片 -->
-                <div class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden">
-                    <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
-                        <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                            <svg class="w-5 h-5 text-blue-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path>
-                            </svg>
-                            问题输入
-                        </h2>
-                    </div>
-                    <div class="p-6 space-y-4">
-                        <!-- 问题输入框 -->
-                        <div>
-                            <label class="block text-sm font-medium text-gray-700 mb-2">您的问题</label>
-                            <textarea 
-                                id="question-input" 
-                                rows="4" 
-                                class="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 resize-none transition-all"
-                                placeholder="请输入您的问题，例如：雇主责任险和工伤保险有什么区别？"
-                            ></textarea>
-                        </div>
-                        
-                        <!-- 参数配置 -->
-                        <div class="grid grid-cols-3 gap-4">
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">召回数量</label>
-                                <input type="number" id="top-k" value="10" min="1" max="50" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">重排数量</label>
-                                <input type="number" id="rerank-top-k" value="3" min="1" max="10" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500">
-                            </div>
-                            <div>
-                                <label class="block text-sm font-medium text-gray-700 mb-1">索引名称</label>
-                                <input type="text" id="index-name" value="cs_knowledge_base" class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-2 focus:ring-blue-500">
-                            </div>
-                        </div>
-                        
-                        <!-- 提交按钮 -->
-                        <button 
-                            id="submit-btn" 
-                            onclick="submitQuestion()"
-                            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors flex items-center justify-center gap-2"
-                        >
-                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                            </svg>
-                            <span>开始问答</span>
-                        </button>
-                    </div>
-                </div>
-                
-                <!-- 示例问题 -->
-                <div class="bg-white rounded-xl shadow-sm border border-gray-200 p-6">
-                    <h3 class="text-sm font-semibold text-gray-700 mb-3">💡 示例问题（点击快速填充）</h3>
-                    <div class="flex flex-wrap gap-2">
-                        <button onclick="setExample('雇主责任险和工伤保险有什么区别？')" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-full transition-colors">
-                            雇主责任险和工伤保险有什么区别？
-                        </button>
-                        <button onclick="setExample('平安雇主险赔偿标准是什么？')" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-full transition-colors">
-                            平安雇主险赔偿标准是什么？
-                        </button>
-                        <button onclick="setExample('员工受伤怎么赔偿？')" class="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 text-gray-700 text-sm rounded-full transition-colors">
-                            员工受伤怎么赔偿？
-                        </button>
-                    </div>
-                </div>
+    <!-- ============ 对话区 ============ -->
+    <div class="chat-area" id="chat-area">
+        <div class="chat-container" id="chat-container">
+            <!-- 空状态 -->
+            <div class="empty-state" id="empty-state">
+                <div class="empty-icon">💬</div>
+                <h2>开始问答</h2>
+                <p>输入您的问题，LocalRAG 将检索知识库并生成答案</p>
             </div>
-            
-            <!-- 右侧：结果展示区域 -->
-            <div class="space-y-6">
-                <!-- 最终答案卡片 -->
-                <div id="answer-card" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
-                    <div class="px-6 py-4 border-b border-gray-100 bg-gradient-to-r from-blue-50 to-indigo-50">
-                        <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                            <svg class="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
-                            </svg>
-                            最终答案
-                            <!-- 缓存徽章插槽（HIT/MISS + 响应时间，步骤E） -->
-                            <span id="cache-badge-slot" class="ml-auto"></span>
-                        </h2>
-                    </div>
-                    <div class="p-6">
-                        <div id="answer-content" class="prose max-w-none text-gray-700 leading-relaxed whitespace-pre-wrap"></div>
-                    </div>
-                </div>
-                
-                <!-- 检索结果卡片 -->
-                <div id="sources-card" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
-                    <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
-                        <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                            <svg class="w-5 h-5 text-green-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
-                            </svg>
-                            检索到的文档
-                        </h2>
-                    </div>
-                    <div class="p-6">
-                        <div id="sources-list" class="space-y-4">
-                            <!-- 动态插入文档卡片 -->
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 耗时统计卡片 -->
-                <div id="latency-card" class="bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden hidden">
-                    <div class="px-6 py-4 border-b border-gray-100 bg-gray-50">
-                        <h2 class="text-lg font-semibold text-gray-800 flex items-center gap-2">
-                            <svg class="w-5 h-5 text-purple-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                            </svg>
-                            耗时统计
-                        </h2>
-                    </div>
-                    <div class="p-6">
-                        <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            <div class="text-center p-4 bg-blue-50 rounded-lg">
-                                <div id="latency-total" class="text-2xl font-bold text-blue-600">-</div>
-                                <div class="text-sm text-gray-600 mt-1">总耗时 (ms)</div>
-                            </div>
-                            <div class="text-center p-4 bg-green-50 rounded-lg">
-                                <div id="latency-retrieval" class="text-2xl font-bold text-green-600">-</div>
-                                <div class="text-sm text-gray-600 mt-1">检索 (ms)</div>
-                            </div>
-                            <div class="text-center p-4 bg-orange-50 rounded-lg">
-                                <div id="latency-rerank" class="text-2xl font-bold text-orange-600">-</div>
-                                <div class="text-sm text-gray-600 mt-1">重排 (ms)</div>
-                            </div>
-                            <div class="text-center p-4 bg-purple-50 rounded-lg">
-                                <div id="latency-llm" class="text-2xl font-bold text-purple-600">-</div>
-                                <div class="text-sm text-gray-600 mt-1">LLM生成 (ms)</div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 初始状态提示 -->
-                <div id="initial-state" class="bg-white rounded-xl shadow-sm border border-gray-200 p-12 text-center">
-                    <div class="w-20 h-20 bg-blue-100 rounded-full flex items-center justify-center mx-auto mb-6">
-                        <svg class="w-10 h-10 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"></path>
-                        </svg>
-                    </div>
-                    <h3 class="text-xl font-semibold text-gray-900 mb-2">开始问答</h3>
-                    <p class="text-gray-500 max-w-md mx-auto">在左侧输入框中输入您的问题，点击"开始问答"按钮，系统将自动检索知识库并生成答案。</p>
+            <!-- 对话流消息将动态插入到这里 -->
+            <div id="message-list"></div>
+        </div>
+    </div>
+
+    <!-- ============ 输入区 ============ -->
+    <div class="input-area">
+        <!-- 参数面板（齿轮弹出） -->
+        <div class="params-panel" id="params-panel">
+            <div class="param-row">
+                <label>召回数量</label>
+                <input type="number" id="top-k" value="10" min="1" max="50">
+                <label style="margin-left:12px;">重排数量</label>
+                <input type="number" id="rerank-top-k" value="3" min="1" max="10">
+                <label style="margin-left:12px;">索引</label>
+                <input type="text" id="index-name" value="cs_knowledge_base" style="width:120px;">
+            </div>
+            <!-- 缓存统计折叠到齿轮面板 -->
+            <div class="cache-stat-inline" id="cache-stat-inline">
+                <div class="stat-row">
+                    <span>⚡ 缓存</span>
+                    <span>总查询: <span class="num" id="stat-total">0</span></span>
+                    <span>HIT: <span class="num" id="stat-hit" style="color:#52c41a;">0</span></span>
+                    <span>MISS: <span class="num" id="stat-miss">0</span></span>
+                    <span>命中率: <span class="num" id="stat-hitrate">0%</span></span>
+                    <span>HIT均: <span class="num" id="stat-avg-hit">- ms</span></span>
+                    <span>MISS均: <span class="num" id="stat-avg-miss">- ms</span></span>
+                    <span id="cache-availability" style="color:#5a5a7a;">检测中…</span>
+                    <button class="flush-btn" onclick="flushCacheAction()">清空</button>
                 </div>
             </div>
         </div>
-        </div>
-    </main>
 
-    <!-- 页脚 -->
-    <footer class="bg-white border-t border-gray-200 mt-12">
-        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-            <div class="flex justify-between items-center">
-                <p class="text-sm text-gray-500">LocalRAG-CS © 2026 | 客服知识库问答系统</p>
-                <div class="flex space-x-4">
-                    <span class="text-sm text-gray-400">API版本: v1.0.0</span>
-                </div>
-            </div>
+        <div class="input-container">
+            <button class="gear-btn" id="gear-btn" title="参数设置">
+                <i class="fas fa-cog"></i>
+            </button>
+            <textarea id="question-input" rows="1" placeholder="输入您的问题，例如：雇主责任险和工伤保险有什么区别？" oninput="autoResize(this)"></textarea>
+            <button class="send-btn" id="submit-btn" onclick="submitQuestion()">
+                <i class="fas fa-arrow-up"></i>
+            </button>
         </div>
-    </footer>
+    </div>
 
-    <!-- JavaScript 代码 -->
     <script>
         // ============ 全局状态 ============
         const state = {
             isLoading: false,
             apiBaseUrl: window.location.origin,
-            // ===== 缓存性能本地累计（任务步骤E） =====
-            // 本会话累计 HIT/MISS 平均响应时间，独立于后端 hit/miss 计数（后端是跨会话累计）
-            cacheLocal: {
-                hit: 0,
-                miss: 0,
-                hitMsSum: 0,
-                missMsSum: 0,
-            },
+            currentSessionId: localStorage.getItem('lastSessionId') || null,
+            cacheLocal: { hit: 0, miss: 0, hitMsSum: 0, missMsSum: 0 },
         };
 
-        // ============ DOM 元素获取 ============
-        const elements = {
+        // ============ DOM 引用 ============
+        const el = {
             questionInput: document.getElementById('question-input'),
-            topKInput: document.getElementById('top-k'),
-            rerankTopKInput: document.getElementById('rerank-top-k'),
-            indexNameInput: document.getElementById('index-name'),
             submitBtn: document.getElementById('submit-btn'),
-            answerCard: document.getElementById('answer-card'),
-            answerContent: document.getElementById('answer-content'),
-            sourcesCard: document.getElementById('sources-card'),
-            sourcesList: document.getElementById('sources-list'),
-            latencyCard: document.getElementById('latency-card'),
-            latencyTotal: document.getElementById('latency-total'),
-            latencyRetrieval: document.getElementById('latency-retrieval'),
-            latencyRerank: document.getElementById('latency-rerank'),
-            latencyLlm: document.getElementById('latency-llm'),
-            initialState: document.getElementById('initial-state')
+            chatArea: document.getElementById('chat-area'),
+            messageList: document.getElementById('message-list'),
+            emptyState: document.getElementById('empty-state'),
+            paramsPanel: document.getElementById('params-panel'),
+            gearBtn: document.getElementById('gear-btn'),
         };
 
         // ============ 工具函数 ============
-        
-        // 设置示例问题
-        function setExample(question) {
-            elements.questionInput.value = question;
-            elements.questionInput.focus();
-        }
-        
-        // 显示加载状态
-        function setLoading(loading) {
-            state.isLoading = loading;
-            elements.submitBtn.disabled = loading;
-            
-            if (loading) {
-                elements.submitBtn.innerHTML = `
-                    <svg class="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                    <span>处理中...</span>
-                `;
-            } else {
-                elements.submitBtn.innerHTML = `
-                    <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                    </svg>
-                    <span>开始问答</span>
-                `;
-            }
-        }
-        
-        // 隐藏初始状态提示
-        function hideInitialState() {
-            elements.initialState.classList.add('hidden');
-        }
-        
-        // 显示结果卡片
-        function showResultCards() {
-            elements.answerCard.classList.remove('hidden');
-            elements.sourcesCard.classList.remove('hidden');
-            elements.latencyCard.classList.remove('hidden');
-        }
-        
-        // 渲染答案
-        function renderAnswer(answer) {
-            elements.answerContent.textContent = answer;
+
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
         }
 
-        // 追加答案（流式打字机效果）
-        // 每次只追加一个 token，避免整段重渲染导致跳动
-        function appendAnswer(token) {
-            if (!token) return;
-            elements.answerContent.textContent += token;
-        }
-
-        // 清空答案文本（流式开始前用）
-        function clearAnswer() {
-            elements.answerContent.textContent = '';
-        }
-        
-        // 渲染文档来源
-        function renderSources(sources) {
-            if (!sources || sources.length === 0) {
-                elements.sourcesList.innerHTML = `
-                    <div class="text-center py-8 text-gray-500">
-                        <p>未检索到相关文档</p>
-                    </div>
-                `;
-                return;
-            }
-            
-            const html = sources.map((doc, index) => {
-                // 构建分数显示字符串
-                let scoreDisplay = '';
-                const bm25Score = doc.bm25_score !== undefined ? doc.bm25_score : doc.es_score;
-                const vectorScore = doc.vector_score !== undefined ? doc.vector_score : 0;
-                const hasVector = doc.has_vector !== undefined ? doc.has_vector : (doc.vector_score !== undefined);
-                
-                // 判断哪个分数相对更高（BM25是10+量级，向量是0-1量级，需要归一化比较）
-                // BM25通常范围是5-20，向量是0.5-1.0，用相对比例比较
-                const bm25Normalized = (bm25Score - 5) / 15;  // 归一化到0-1
-                const vectorNormalized = vectorScore;
-                
-                const bm25Higher = bm25Normalized > vectorNormalized;
-                
-                if (hasVector && vectorScore > 0) {
-                    // 使用了向量检索，显示两个分数，分高的加粗
-                    const bm25Style = bm25Higher ? 'font-bold' : '';
-                    const vectorStyle = !bm25Higher ? 'font-bold' : '';
-                    
-                    scoreDisplay = `
-                        <span class="${bm25Style}" style="color: #3b82f6;">BM25: ${bm25Score.toFixed(1)}</span>
-                        <span style="color: #9ca3af;"> | </span>
-                        <span class="${vectorStyle}" style="color: #10b981;">向量: ${vectorScore.toFixed(2)}</span>
-                    `;
-                } else {
-                    // 纯BM25，只显示蓝色的BM25分数
-                    scoreDisplay = `<span style="color: #3b82f6;">BM25: ${bm25Score.toFixed(1)}</span>`;
-                }
-                
-                return `
-                <div class="doc-card bg-gray-50 rounded-lg p-4 border border-gray-200">
-                    <div class="flex items-start justify-between mb-2">
-                        <div class="flex items-center gap-2">
-                            <span class="w-6 h-6 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center text-xs font-bold">
-                                ${index + 1}
-                            </span>
-                            <h4 class="font-semibold text-gray-800 text-sm">${escapeHtml(doc.title || '未命名文档')}</h4>
-                        </div>
-                    </div>
-                    <p class="text-sm text-gray-600 mb-3 line-clamp-3">${escapeHtml(doc.content || '')}</p>
-                    <div class="text-xs">
-                        ${scoreDisplay}
-                    </div>
-                    ${doc.source_file ? `<p class="text-xs text-gray-400 mt-1">来源: ${escapeHtml(doc.source_file)}</p>` : ''}
-                </div>
-            `}).join('');
-            
-            elements.sourcesList.innerHTML = html;
-        }
-        
-        // 渲染耗时统计
-        function renderLatency(latency) {
-            elements.latencyTotal.textContent = Math.round(latency.total_ms || 0);
-            elements.latencyRetrieval.textContent = Math.round(latency.retrieval_ms || 0);
-            elements.latencyRerank.textContent = Math.round(latency.rerank_ms || 0);
-            elements.latencyLlm.textContent = Math.round(latency.llm_ms || 0);
-        }
-
-        // ============ 缓存徽章 & 统计（步骤E） ============
-
-        // 渲染右上角 HIT/MISS 徽章
-        // status: 'HIT' | 'MISS' | null
-        // ms: 响应时间数值（毫秒），小于 1000 显示 ms，否则显示 s
-        function renderCacheBadge(status, ms) {
-            const slot = document.getElementById('cache-badge-slot');
-            if (!slot) return;
-            if (!status) { slot.innerHTML = ''; return; }
-            const isHit = status === 'HIT';
-            const cls = isHit ? 'cache-badge-hit' : 'cache-badge-miss';
-            const label = isHit ? 'HIT' : 'MISS';
-            // 格式化响应时间：<1000ms 用 ms，>=1000 用 s
-            let timeText = '';
-            if (typeof ms === 'number') {
-                timeText = ms < 1000
-                    ? `${Math.round(ms)}ms`
-                    : `${(ms / 1000).toFixed(2)}s`;
-            }
-            slot.innerHTML = `
-                <span class="cache-badge ${cls}">
-                    <span class="dot"></span>
-                    ${label}${timeText ? ' · ' + timeText : ''}
-                </span>
-            `;
-        }
-
-        // 本地累计当前会话的 HIT/MISS 平均响应时间
-        function accumulateLocalStats(status, ms) {
-            if (typeof ms !== 'number') return;
-            if (status === 'HIT') {
-                state.cacheLocal.hit += 1;
-                state.cacheLocal.hitMsSum += ms;
-            } else if (status === 'MISS') {
-                state.cacheLocal.miss += 1;
-                state.cacheLocal.missMsSum += ms;
-            }
-            const c = state.cacheLocal;
-            const avgHit = c.hit > 0 ? Math.round(c.hitMsSum / c.hit) : null;
-            const avgMiss = c.miss > 0 ? Math.round(c.missMsSum / c.miss) : null;
-            const avgHitEl = document.getElementById('stat-avg-hit');
-            const avgMissEl = document.getElementById('stat-avg-miss');
-            if (avgHitEl) avgHitEl.textContent = avgHit === null ? '- ms' : `${avgHit} ms`;
-            if (avgMissEl) avgMissEl.textContent = avgMiss === null ? '- ms' : `${avgMiss} ms`;
-        }
-
-        // 从 /api/cache/stats 拉服务端累计，刷新顶部统计条
-        async function refreshCacheStats() {
-            try {
-                const resp = await fetch(`${state.apiBaseUrl}/api/cache/stats`);
-                if (!resp.ok) throw new Error('stats接口异常');
-                const s = await resp.json();
-                document.getElementById('stat-total').textContent = s.total || 0;
-                document.getElementById('stat-hit').textContent = s.hit || 0;
-                document.getElementById('stat-miss').textContent = s.miss || 0;
-                document.getElementById('stat-hitrate').textContent = `${(s.hit_rate || 0).toFixed(1)}%`;
-                const avail = document.getElementById('cache-availability');
-                if (avail) {
-                    if (s.available) {
-                        avail.textContent = `Redis 在线 · ${s.cached_keys || 0} 条缓存`;
-                        avail.className = 'text-xs px-2 py-0.5 rounded bg-emerald-100 text-emerald-700';
-                    } else if (s.enabled) {
-                        avail.textContent = 'Redis 不可达（已降级）';
-                        avail.className = 'text-xs px-2 py-0.5 rounded bg-amber-100 text-amber-700';
-                    } else {
-                        avail.textContent = '缓存已关闭';
-                        avail.className = 'text-xs px-2 py-0.5 rounded bg-gray-200 text-gray-600';
-                    }
-                }
-            } catch (e) {
-                // 拉失败就静默，别打扰用户
-                console.warn('刷新缓存统计失败:', e);
-            }
-        }
-
-        // 一键清空缓存（按钮事件）
-        async function flushCacheAction() {
-            if (!confirm('确认清空 LocalRAG 缓存？此操作仅清空本项目的缓存键，不影响其它数据。')) return;
-            try {
-                const resp = await fetch(`${state.apiBaseUrl}/api/cache/flush`, { method: 'POST' });
-                const data = await resp.json();
-                alert(`已清空 ${data.flushed || 0} 条缓存`);
-                // 重置本地会话统计
-                state.cacheLocal = { hit: 0, miss: 0, hitMsSum: 0, missMsSum: 0 };
-                document.getElementById('stat-avg-hit').textContent = '- ms';
-                document.getElementById('stat-avg-miss').textContent = '- ms';
-                refreshCacheStats();
-            } catch (e) {
-                alert('清空失败: ' + e.message);
-            }
-        }
-        
-        // HTML转义，防止XSS攻击
         function escapeHtml(text) {
             if (!text) return '';
-            const div = document.createElement('div');
+            var div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
 
-        // ============ 核心功能 ============
-        
-        // 提交问题
+        function formatTimeAgo(dateStr) {
+            if (!dateStr) return '未知';
+            try {
+                var date = new Date(dateStr);
+                var now = new Date();
+                var diff = Math.floor((now - date) / 1000);
+                if (diff < 60) return '刚刚';
+                if (diff < 3600) return Math.floor(diff / 60) + '分钟前';
+                if (diff < 86400) return Math.floor(diff / 3600) + '小时前';
+                if (diff < 604800) return Math.floor(diff / 86400) + '天前';
+                return date.toLocaleDateString('zh-CN');
+            } catch (e) { return dateStr; }
+        }
+
+        // ============ 对话流渲染 ============
+
+        // 添加用户消息到对话流
+        function addUserMessage(text) {
+            var div = document.createElement('div');
+            div.className = 'msg-row msg-row-user';
+            div.innerHTML = '<div class="msg-bubble msg-bubble-user">' + escapeHtml(text) + '</div>';
+            el.messageList.appendChild(div);
+            scrollToBottom();
+        }
+
+        // 添加 AI 消息容器（返回消息元素，用于流式追加）
+        function addAiMessage() {
+            var div = document.createElement('div');
+            div.className = 'msg-row msg-row-ai';
+            div.innerHTML = '<div class="msg-avatar msg-avatar-ai">R</div>' +
+                '<div style="flex:1;min-width:0;">' +
+                '<div class="msg-header"><span class="msg-role-label">LocalRAG</span></div>' +
+                '<div class="msg-bubble msg-bubble-ai" id="ai-msg-content"></div>' +
+                '<div class="answer-footer" id="ai-msg-footer"></div>' +
+                '<div class="sources-panel hidden" id="ai-msg-sources"></div>' +
+                '</div>';
+            el.messageList.appendChild(div);
+            scrollToBottom();
+            return {
+                content: div.querySelector('#ai-msg-content'),
+                footer: div.querySelector('#ai-msg-footer'),
+                sources: div.querySelector('#ai-msg-sources'),
+            };
+        }
+
+        // 显示"思考中"占位
+        function addThinkingIndicator() {
+            var div = document.createElement('div');
+            div.className = 'msg-row msg-row-ai';
+            div.id = 'thinking-indicator';
+            div.innerHTML = '<div class="msg-avatar msg-avatar-ai">R</div>' +
+                '<div style="flex:1;min-width:0;">' +
+                '<div class="msg-header"><span class="msg-role-label">LocalRAG</span></div>' +
+                '<div class="thinking-dots"><span></span><span></span><span></span></div>' +
+                '</div>';
+            el.messageList.appendChild(div);
+            scrollToBottom();
+        }
+
+        function removeThinkingIndicator() {
+            var ti = document.getElementById('thinking-indicator');
+            if (ti) ti.remove();
+        }
+
+        function scrollToBottom() {
+            requestAnimationFrame(function() {
+                el.chatArea.scrollTop = el.chatArea.scrollHeight;
+            });
+        }
+
+        // ============ 核心问答 ============
+
         async function submitQuestion() {
             if (state.isLoading) return;
-            
-            // 获取输入值
-            const question = elements.questionInput.value.trim();
-            const topK = parseInt(elements.topKInput.value) || 10;
-            const rerankTopK = parseInt(elements.rerankTopKInput.value) || 3;
-            const indexName = elements.indexNameInput.value.trim() || 'cs_knowledge_base';
-            
-            // 验证输入
+
+            var question = el.questionInput.value.trim();
             if (!question) {
-                alert('请输入问题');
-                elements.questionInput.focus();
+                el.questionInput.focus();
                 return;
             }
-            
-            // 设置加载状态
-            setLoading(true);
-            hideInitialState();
-            // 流式模式：先展示答案卡片，清空旧内容，引用/耗时占位
-            showResultCards();
-            clearAnswer();
-            renderSources([]);
-            renderLatency({total_ms: 0, retrieval_ms: 0, rerank_ms: 0, llm_ms: 0});
-            // 每次新请求都清掉徽章，避免上次的状态残留
-            renderCacheBadge(null);
 
-            const requestBody = {
+            // 隐藏空状态
+            el.emptyState.style.display = 'none';
+
+            // 添加用户消息
+            addUserMessage(question);
+            el.questionInput.value = '';
+            autoResize(el.questionInput);
+
+            // 显示思考中
+            addThinkingIndicator();
+
+            // 参数
+            var topK = parseInt(document.getElementById('top-k').value) || 10;
+            var rerankTopK = parseInt(document.getElementById('rerank-top-k').value) || 3;
+            var indexName = document.getElementById('index-name').value.trim() || 'cs_knowledge_base';
+
+            var requestBody = {
                 question: question,
                 top_k: topK,
                 rerank_top_k: rerankTopK,
@@ -736,10 +805,26 @@
                 session_id: state.currentSessionId || undefined
             };
 
+            state.isLoading = true;
+            el.submitBtn.disabled = true;
+
+            // 创建 AI 消息容器
+            var aiMsg = addAiMessage();
+            var aiContent = aiMsg.content;
+            var aiFooter = aiMsg.footer;
+            var aiSources = aiMsg.sources;
+
+            // 移除思考中
+            removeThinkingIndicator();
+
+            // 打字光标
+            aiContent.classList.add('typing-cursor');
+
+            var sourcesData = [];
+            var latencyData = null;
+
             try {
-                // 调用流式 SSE 接口
-                // 后端会按事件名分发：token / sources / latency / done / error
-                const response = await fetch(`${state.apiBaseUrl}/api/ask/stream`, {
+                var response = await fetch(state.apiBaseUrl + '/api/ask/stream', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -749,49 +834,48 @@
                 });
 
                 if (!response.ok) {
-                    // 流式接口不可用时降级到非流式
                     console.warn('流式接口异常，降级到非流式 /api/ask');
-                    await fallbackToNonStream(requestBody);
+                    await fallbackToNonStream(requestBody, aiContent, aiFooter, aiSources);
                     return;
                 }
 
-                // 手工解析 SSE：fetch + ReadableStream 比 EventSource 灵活（支持 POST）
-                const reader = response.body.getReader();
-                const decoder = new TextDecoder('utf-8');
-                let buffer = '';
+                var reader = response.body.getReader();
+                var decoder = new TextDecoder('utf-8');
+                var buffer = '';
 
                 while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
+                    var result = await reader.read();
+                    if (result.done) break;
+                    buffer += decoder.decode(result.value, { stream: true });
 
-                    // SSE 以空行（\n\n）分割消息
-                    let sepIdx;
+                    var sepIdx;
                     while ((sepIdx = buffer.indexOf('\n\n')) >= 0) {
-                        const rawEvent = buffer.slice(0, sepIdx);
+                        var rawEvent = buffer.slice(0, sepIdx);
                         buffer = buffer.slice(sepIdx + 2);
-                        handleSseEvent(rawEvent);
+                        handleSseEvent(rawEvent, aiContent, aiFooter, aiSources);
                     }
                 }
             } catch (error) {
                 console.error('流式请求失败:', error);
-                // 网络异常也尝试降级，最大化保活
                 try {
-                    await fallbackToNonStream(requestBody);
+                    await fallbackToNonStream(requestBody, aiContent, aiFooter, aiSources);
                 } catch (e2) {
-                    renderAnswer('❌ 请求失败: ' + error.message);
+                    aiContent.textContent = '❌ 请求失败: ' + error.message;
                 }
             } finally {
-                setLoading(false);
+                state.isLoading = false;
+                el.submitBtn.disabled = false;
+                aiContent.classList.remove('typing-cursor');
             }
         }
 
-        // 解析单条 SSE 消息（多行：event: xxx \n data: yyy）
-        function handleSseEvent(raw) {
-            const lines = raw.split('\n');
-            let eventName = 'message';
-            let dataStr = '';
-            for (const line of lines) {
+        // SSE 事件处理
+        function handleSseEvent(raw, contentEl, footerEl, sourcesEl) {
+            var lines = raw.split('\n');
+            var eventName = 'message';
+            var dataStr = '';
+            for (var i = 0; i < lines.length; i++) {
+                var line = lines[i];
                 if (line.startsWith('event:')) {
                     eventName = line.slice(6).trim();
                 } else if (line.startsWith('data:')) {
@@ -800,385 +884,227 @@
             }
             if (!dataStr) return;
 
-            let data;
-            try {
-                data = JSON.parse(dataStr);
-            } catch (e) {
-                console.warn('SSE 数据解析失败:', dataStr);
-                return;
-            }
+            var data;
+            try { data = JSON.parse(dataStr); } catch (e) { return; }
 
-            // 按后端约定分发事件
             switch (eventName) {
                 case 'token':
-                    appendAnswer(data.text || '');
+                    contentEl.textContent += (data.text || '');
+                    scrollToBottom();
                     break;
                 case 'sources':
-                    renderSources(data.sources || []);
+                    renderSourcesInline(data.sources || [], sourcesEl);
                     break;
                 case 'latency':
-                    renderLatency(data);
+                    renderLatencyInline(data, footerEl);
                     break;
                 case 'done':
-                    // 结束信号：done 事件里带 cache_status 和 response_time_ms（步骤E）
                     if (data && data.cache_status) {
-                        renderCacheBadge(data.cache_status, data.response_time_ms);
+                        renderCacheBadgeInline(data.cache_status, data.response_time_ms, footerEl);
                         accumulateLocalStats(data.cache_status, data.response_time_ms);
-                        // 触发顶部统计条刷新（拉服务端累计）
                         refreshCacheStats();
                     }
-                    // 处理返回的 session_id（新会话自动创建）
                     if (data && data.session_id) {
                         state.currentSessionId = data.session_id;
                         localStorage.setItem('lastSessionId', data.session_id);
-                        document.getElementById('current-session-bar').classList.remove('hidden');
                     }
-                    // 刷新会话列表（新会话创建或标题更新）
                     loadSessions();
                     break;
                 case 'error':
-                    appendAnswer('\n\n❌ ' + (data.message || '生成异常'));
-                    break;
-                default:
-                    // 未知事件忽略
+                    contentEl.textContent += '\n\n❌ ' + (data.message || '生成异常');
                     break;
             }
         }
 
-        // 降级：调用原非流式 /api/ask
-        async function fallbackToNonStream(requestBody) {
-            const response = await fetch(`${state.apiBaseUrl}/api/ask`, {
+        // 降级到非流式
+        async function fallbackToNonStream(requestBody, contentEl, footerEl, sourcesEl) {
+            var response = await fetch(state.apiBaseUrl + '/api/ask', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(requestBody)
             });
-            const data = await response.json();
+            var data = await response.json();
             if (!response.ok) {
-                throw new Error(data.detail?.message || `请求失败: ${response.status}`);
+                throw new Error(data.detail && data.detail.message || '请求失败: ' + response.status);
             }
-            renderAnswer(data.answer);
-            renderSources(data.sources);
-            renderLatency(data.latency);
-            // 非流式降级路径也要把徽章渲染出来（任务步骤E）
+            contentEl.textContent = data.answer;
+            renderSourcesInline(data.sources, sourcesEl);
+            renderLatencyInline(data.latency, footerEl);
             if (data.cache_status) {
-                renderCacheBadge(data.cache_status, data.response_time_ms);
+                renderCacheBadgeInline(data.cache_status, data.response_time_ms, footerEl);
                 accumulateLocalStats(data.cache_status, data.response_time_ms);
                 refreshCacheStats();
             }
-            // 处理返回的 session_id（新会话自动创建）
             if (data.session_id) {
                 state.currentSessionId = data.session_id;
                 localStorage.setItem('lastSessionId', data.session_id);
-                document.getElementById('current-session-bar').classList.remove('hidden');
-                document.getElementById('current-session-title').textContent = data.question.slice(0, 50) + (data.question.length > 50 ? '...' : '');
             }
         }
-        
-        // ============ 会话管理 ============
-        
-        // 当前会话ID
-        state.currentSessionId = localStorage.getItem('lastSessionId') || null;
-        
-        // 加载会话列表
-        async function loadSessions() {
-            try {
-                const resp = await fetch(`${state.apiBaseUrl}/api/sessions?limit=50`);
-                if (!resp.ok) throw new Error('加载失败');
-                const data = await resp.json();
-                renderSessionList(data.sessions || []);
-                renderMobileSessionList(data.sessions || []);
-            } catch (e) {
-                document.getElementById('session-list').innerHTML = `
-                    <div class="text-center text-gray-400 py-8 text-sm">
-                        <i class="fas fa-exclamation-triangle text-lg mb-2"></i>
-                        <p>加载失败</p>
-                    </div>
-                `;
-            }
-        }
-        
-        // 渲染会话列表
-        function renderSessionList(sessions) {
-            const el = document.getElementById('session-list');
-            if (!sessions.length) {
-                el.innerHTML = `
-                    <div class="text-center text-gray-400 py-8 text-sm">
-                        <i class="fas fa-inbox text-lg mb-2"></i>
-                        <p>暂无会话</p>
-                        <p class="text-xs mt-1">开始问答后自动创建</p>
-                    </div>
-                `;
+
+        // ============ 渲染函数 ============
+
+        // 来源（折叠面板）
+        function renderSourcesInline(sources, sourcesEl) {
+            if (!sources || sources.length === 0) {
+                sourcesEl.classList.add('hidden');
                 return;
             }
-            
-            el.innerHTML = sessions.map(s => {
-                const isActive = s.id === state.currentSessionId;
-                const timeAgo = formatTimeAgo(s.updated_at);
-                return `
-                    <div class="session-item px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${isActive ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}" 
-                         data-session-id="${s.id}">
-                        <div class="flex items-start justify-between">
-                            <div class="flex-1 min-w-0">
-                                <p class="text-sm font-medium text-gray-800 truncate">${escapeHtml(s.title)}</p>
-                                <div class="flex items-center gap-2 text-xs text-gray-400 mt-1">
-                                    <span>${timeAgo}</span>
-                                    <span>·</span>
-                                    <span>${s.message_count} 条</span>
-                                </div>
-                            </div>
-                            <button class="delete-session-btn ml-2 p-1.5 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors flex-shrink-0"
-                                    data-session-id="${s.id}" title="删除会话">
-                                <i class="fas fa-trash-alt text-xs"></i>
-                            </button>
-                        </div>
-                    </div>
-                `;
-            }).join('');
-            
-            // 绑定点击事件
-            el.querySelectorAll('.session-item').forEach(item => {
-                item.addEventListener('click', (e) => {
-                    if (e.target.closest('.delete-session-btn')) return;
-                    switchSession(item.dataset.sessionId);
-                });
-            });
-            
-            // 绑定删除事件
-            el.querySelectorAll('.delete-session-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    deleteSession(btn.dataset.sessionId);
-                });
-            });
-        }
-        
-        // 渲染移动端会话列表
-        function renderMobileSessionList(sessions) {
-            const el = document.getElementById('mobile-session-list');
-            if (!sessions.length) {
-                el.innerHTML = '<div class="text-center text-gray-400 py-4 text-sm">暂无会话</div>';
-                return;
+            var html = '';
+            for (var i = 0; i < sources.length; i++) {
+                var doc = sources[i];
+                var bm25Score = doc.bm25_score !== undefined ? doc.bm25_score : (doc.es_score || 0);
+                var vectorScore = doc.vector_score !== undefined ? doc.vector_score : 0;
+                html += '<div class="source-item">' +
+                    '<div class="source-title">#' + (i + 1) + ' ' + escapeHtml(doc.title || '未命名文档') + '</div>' +
+                    '<div class="source-content">' + escapeHtml(doc.content || '') + '</div>' +
+                    '<div class="source-score">BM25: ' + bm25Score.toFixed(1) + ' | 向量: ' + vectorScore.toFixed(2) +
+                    (doc.source_file ? ' | ' + escapeHtml(doc.source_file) : '') + '</div>' +
+                    '</div>';
             }
-            
-            el.innerHTML = sessions.map(s => {
-                const isActive = s.id === state.currentSessionId;
-                return `
-                    <div class="mobile-session-item px-4 py-3 border-b border-gray-100 cursor-pointer hover:bg-gray-50 transition-colors ${isActive ? 'bg-blue-50' : ''}"
-                         data-session-id="${s.id}">
-                        <p class="text-sm font-medium text-gray-800 truncate">${escapeHtml(s.title)}</p>
-                        <p class="text-xs text-gray-400 mt-0.5">${formatTimeAgo(s.updated_at)} · ${s.message_count} 条</p>
-                    </div>
-                `;
-            }).join('');
-            
-            el.querySelectorAll('.mobile-session-item').forEach(item => {
-                item.addEventListener('click', () => {
-                    switchSession(item.dataset.sessionId);
-                    document.getElementById('mobile-session-dropdown').classList.add('hidden');
-                });
-            });
+            sourcesEl.innerHTML = html;
         }
-        
-        // 格式化相对时间
-        function formatTimeAgo(dateStr) {
-            if (!dateStr) return '未知';
-            try {
-                const date = new Date(dateStr);
-                const now = new Date();
-                const diff = Math.floor((now - date) / 1000);
-                if (diff < 60) return '刚刚';
-                if (diff < 3600) return `${Math.floor(diff / 60)}分钟前`;
-                if (diff < 86400) return `${Math.floor(diff / 3600)}小时前`;
-                if (diff < 604800) return `${Math.floor(diff / 86400)}天前`;
-                return date.toLocaleDateString('zh-CN');
-            } catch (e) {
-                return dateStr;
+
+        // 耗时（答案底部小字）
+        function renderLatencyInline(latency, footerEl) {
+            if (!latency) return;
+            var total = Math.round(latency.total_ms || 0);
+            var retrieval = Math.round(latency.retrieval_ms || 0);
+            var rerank = Math.round(latency.rerank_ms || 0);
+            var llm = Math.round(latency.llm_ms || 0);
+            footerEl.innerHTML =
+                '<span class="latency-item"><i class="fas fa-clock"></i> 总耗时 ' + total + 'ms</span>' +
+                '<span class="latency-item">检索 ' + retrieval + 'ms</span>' +
+                '<span class="latency-item">重排 ' + rerank + 'ms</span>' +
+                '<span class="latency-item">LLM ' + llm + 'ms</span>';
+        }
+
+        // 缓存徽章
+        function renderCacheBadgeInline(status, ms, footerEl) {
+            if (!status) return;
+            var isHit = status === 'HIT';
+            var cls = isHit ? 'cache-badge-hit' : 'cache-badge-miss';
+            var label = isHit ? 'HIT' : 'MISS';
+            var timeText = '';
+            if (typeof ms === 'number') {
+                timeText = ms < 1000 ? Math.round(ms) + 'ms' : (ms / 1000).toFixed(2) + 's';
             }
+            var badgeHtml = '<span class="cache-badge ' + cls + '"><span class="dot"></span>' + label + (timeText ? ' · ' + timeText : '') + '</span>';
+            footerEl.innerHTML = badgeHtml + footerEl.innerHTML;
         }
-        
-        // 切换会话
-        async function switchSession(sessionId) {
-            state.currentSessionId = sessionId;
-            localStorage.setItem('lastSessionId', sessionId);
-            
-            // 更新UI
-            document.querySelectorAll('.session-item').forEach(el => {
-                el.classList.remove('bg-blue-50', 'border-l-2', 'border-l-blue-500');
-                if (el.dataset.sessionId === sessionId) {
-                    el.classList.add('bg-blue-50', 'border-l-2', 'border-l-blue-500');
-                }
-            });
-            
-            // 显示当前会话标识
-            showCurrentSessionBar();
-            
-            // 加载历史消息
+
+        // ============ 缓存统计 ============
+
+        function accumulateLocalStats(status, ms) {
+            if (typeof ms !== 'number') return;
+            if (status === 'HIT') {
+                state.cacheLocal.hit += 1;
+                state.cacheLocal.hitMsSum += ms;
+            } else if (status === 'MISS') {
+                state.cacheLocal.miss += 1;
+                state.cacheLocal.missMsSum += ms;
+            }
+            var c = state.cacheLocal;
+            var avgHit = c.hit > 0 ? Math.round(c.hitMsSum / c.hit) : null;
+            var avgMiss = c.miss > 0 ? Math.round(c.missMsSum / c.miss) : null;
+            var avgHitEl = document.getElementById('stat-avg-hit');
+            var avgMissEl = document.getElementById('stat-avg-miss');
+            if (avgHitEl) avgHitEl.textContent = avgHit === null ? '- ms' : avgHit + ' ms';
+            if (avgMissEl) avgMissEl.textContent = avgMiss === null ? '- ms' : avgMiss + ' ms';
+        }
+
+        async function refreshCacheStats() {
             try {
-                const resp = await fetch(`${state.apiBaseUrl}/api/session/${sessionId}/history`);
-                if (resp.status === 404) {
-                    // 会话不存在（可能已被删除），清空状态
-                    console.warn('会话不存在，清空状态');
-                    state.currentSessionId = null;
-                    localStorage.removeItem('lastSessionId');
-                    document.getElementById('current-session-bar').classList.add('hidden');
-                    loadSessions();
-                    return;
-                }
-                if (resp.ok) {
-                    const data = await resp.json();
-                    // 更新会话标题
-                    const sessionInfo = await fetch(`${state.apiBaseUrl}/api/sessions?limit=1`).then(r => r.json());
-                    const sessions = sessionInfo.sessions || [];
-                    const current = sessions.find(s => s.id === sessionId);
-                    if (current) {
-                        document.getElementById('current-session-title').textContent = current.title;
-                    }
-                    
-                    // 清空并显示历史消息
-                    clearAnswer();
-                    if (data.history && data.history.length > 0) {
-                        hideInitialState();
-                        showResultCards();
-                        // 显示历史对话
-                        let historyText = '';
-                        data.history.forEach(msg => {
-                            const prefix = msg.role === 'user' ? '👤 用户: ' : '🤖 助手: ';
-                            historyText += prefix + msg.content + '\n\n';
-                        });
-                        renderAnswer(historyText);
-                        renderSources([]);
+                var resp = await fetch(state.apiBaseUrl + '/api/cache/stats');
+                if (!resp.ok) throw new Error('stats接口异常');
+                var s = await resp.json();
+                document.getElementById('stat-total').textContent = s.total || 0;
+                document.getElementById('stat-hit').textContent = s.hit || 0;
+                document.getElementById('stat-miss').textContent = s.miss || 0;
+                document.getElementById('stat-hitrate').textContent = (s.hit_rate || 0).toFixed(1) + '%';
+                var avail = document.getElementById('cache-availability');
+                if (avail) {
+                    if (s.available) {
+                        avail.textContent = 'Redis在线 · ' + (s.cached_keys || 0) + '条';
+                        avail.style.color = '#52c41a';
+                    } else if (s.enabled) {
+                        avail.textContent = 'Redis不可达（降级）';
+                        avail.style.color = '#d4a017';
                     } else {
-                        // 空会话，清空结果区域
-                        elements.answerCard.classList.add('hidden');
-                        elements.sourcesCard.classList.add('hidden');
-                        elements.latencyCard.classList.add('hidden');
-                        elements.initialState.classList.remove('hidden');
+                        avail.textContent = '缓存已关闭';
+                        avail.style.color = '#5a5a7a';
                     }
                 }
-            } catch (e) {
-                console.warn('加载历史失败:', e);
-            }
-            
-            // 刷新列表
-            loadSessions();
+            } catch (e) { console.warn('刷新缓存统计失败:', e); }
         }
-        
-        // 显示当前会话标识
-        function showCurrentSessionBar() {
-            const bar = document.getElementById('current-session-bar');
-            bar.classList.remove('hidden');
-        }
-        
-        // 创建新会话
-        async function createNewSession() {
+
+        async function flushCacheAction() {
+            if (!confirm('确认清空 LocalRAG 缓存？')) return;
             try {
-                const resp = await fetch(`${state.apiBaseUrl}/api/session/new`, { method: 'POST' });
-                if (!resp.ok) throw new Error('创建失败');
-                const data = await resp.json();
-                state.currentSessionId = data.session_id;
-                localStorage.setItem('lastSessionId', data.session_id);
-                
-                // 清空对话区域
-                clearAnswer();
-                elements.answerCard.classList.add('hidden');
-                elements.sourcesCard.classList.add('hidden');
-                elements.latencyCard.classList.add('hidden');
-                elements.initialState.classList.remove('hidden');
-                elements.questionInput.value = '';
-                
-                // 更新UI
-                document.getElementById('current-session-title').textContent = '新会话';
-                showCurrentSessionBar();
-                
-                // 刷新列表
-                loadSessions();
-            } catch (e) {
-                console.error('创建会话失败:', e);
-            }
+                var resp = await fetch(state.apiBaseUrl + '/api/cache/flush', { method: 'POST' });
+                var data = await resp.json();
+                state.cacheLocal = { hit: 0, miss: 0, hitMsSum: 0, missMsSum: 0 };
+                document.getElementById('stat-avg-hit').textContent = '- ms';
+                document.getElementById('stat-avg-miss').textContent = '- ms';
+                refreshCacheStats();
+            } catch (e) { alert('清空失败: ' + e.message); }
         }
-        
-        // 删除会话
-        async function deleteSession(sessionId) {
-            if (!confirm('确定要删除此会话吗？此操作不可撤销。')) return;
-            try {
-                const resp = await fetch(`${state.apiBaseUrl}/api/session/${sessionId}`, { method: 'DELETE' });
-                if (!resp.ok) throw new Error('删除失败');
-                
-                // 如果删除的是当前会话，清空状态
-                if (sessionId === state.currentSessionId) {
-                    state.currentSessionId = null;
-                    localStorage.removeItem('lastSessionId');
-                    clearAnswer();
-                    elements.answerCard.classList.add('hidden');
-                    elements.sourcesCard.classList.add('hidden');
-                    elements.latencyCard.classList.add('hidden');
-                    elements.initialState.classList.remove('hidden');
-                    document.getElementById('current-session-bar').classList.add('hidden');
-                }
-                
-                loadSessions();
-            } catch (e) {
-                alert('删除失败: ' + e.message);
-            }
+
+        // ============ 会话管理 ============
+
+        async function loadSessions() {
+            // 简单会话列表存在 localStorage 中，仅用于跟踪当前会话
+            // 完整会话管理功能保留但不显示在界面上
         }
-        
-        // 导出报告
+
+        // ============ 导出 ============
+
         async function exportReport(format) {
             if (!state.currentSessionId) {
-                alert('请先创建或选择一个会话');
+                alert('请先发送一条消息创建会话');
                 return;
             }
-            
-            const exportBtn = document.getElementById('export-btn');
-            const originalHtml = exportBtn.innerHTML;
-            exportBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i>导出中...';
+            var exportBtn = document.getElementById('export-btn');
+            var originalHtml = exportBtn.innerHTML;
+            exportBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
             exportBtn.disabled = true;
-            
+
             try {
-                const savePath = exportPathState.currentPath;
-                const body = {
+                var savePath = exportPathState.currentPath;
+                var body = {
                     session_id: state.currentSessionId,
-                    title: document.getElementById('current-session-title').textContent || '问答报告',
+                    title: '问答报告',
                     include_sources: true
                 };
-                if (savePath) {
-                    body.save_path = savePath;
-                }
-                
-                const resp = await fetch(`${state.apiBaseUrl}/api/export/${format}`, {
+                if (savePath) body.save_path = savePath;
+
+                var resp = await fetch(state.apiBaseUrl + '/api/export/' + format, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(body)
                 });
-                
                 if (!resp.ok) {
-                    const err = await resp.json();
+                    var err = await resp.json();
                     throw new Error(err.detail || '导出失败');
                 }
-                
                 if (savePath) {
-                    // 保存到服务器路径模式
-                    const result = await resp.json();
-                    const hint = document.getElementById('export-path-hint');
-                    hint.textContent = `✅ 已保存到: ${result.filepath}`;
+                    var result = await resp.json();
+                    var hint = document.getElementById('export-path-hint');
+                    hint.textContent = '✅ 已保存到: ' + result.filepath;
                     hint.classList.remove('hidden');
-                    hint.classList.add('text-green-500');
-                    setTimeout(() => { hint.classList.add('hidden'); }, 5000);
+                    setTimeout(function() { hint.classList.add('hidden'); }, 5000);
                 } else {
-                    // 浏览器下载模式
-                    const blob = await resp.blob();
-                    const url = URL.createObjectURL(blob);
-                    const a = document.createElement('a');
+                    var blob = await resp.blob();
+                    var url = URL.createObjectURL(blob);
+                    var a = document.createElement('a');
                     a.href = url;
-                    const disposition = resp.headers.get('Content-Disposition');
-                    const filenameMatch = disposition && disposition.match(/filename="?([^"]+)"?/);
-                    a.download = filenameMatch ? filenameMatch[1] : `report.${format}`;
+                    var disposition = resp.headers.get('Content-Disposition');
+                    var filenameMatch = disposition && disposition.match(/filename="?([^"]+)"?/);
+                    a.download = filenameMatch ? filenameMatch[1] : 'report.' + format;
                     document.body.appendChild(a);
                     a.click();
                     document.body.removeChild(a);
                     URL.revokeObjectURL(url);
                 }
-                
             } catch (e) {
                 alert('导出失败: ' + e.message);
             } finally {
@@ -1187,130 +1113,32 @@
                 document.getElementById('export-dropdown').classList.add('hidden');
             }
         }
-        
-        // 清空当前会话
-        async function clearCurrentSession() {
-            if (!state.currentSessionId) return;
-            if (!confirm('确定要清空当前会话的所有消息吗？')) return;
-            try {
-                await fetch(`${state.apiBaseUrl}/api/session/${state.currentSessionId}/clear`, { method: 'POST' });
-                clearAnswer();
-                elements.answerCard.classList.add('hidden');
-                elements.sourcesCard.classList.add('hidden');
-                elements.latencyCard.classList.add('hidden');
-                elements.initialState.classList.remove('hidden');
-            } catch (e) {
-                alert('清空失败: ' + e.message);
-            }
-        }
-        
-        // ============ 初始化 ============
-        
-        // 页面加载完成后执行
-        document.addEventListener('DOMContentLoaded', function() {
-            console.log('LocalRAG-CS 后台界面已加载');
-            
-            // 绑定回车键提交
-            elements.questionInput.addEventListener('keydown', function(e) {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();
-                    submitQuestion();
-                }
-            });
-
-            // 首屏拉一次缓存统计，并每 15 秒自动刷新（演示中能看到数字变化）
-            refreshCacheStats();
-            setInterval(refreshCacheStats, 15000);
-            
-            // ===== 会话管理初始化 =====
-            
-            // 加载会话列表
-            loadSessions();
-            
-            // 新建会话
-            document.getElementById('new-session-btn').addEventListener('click', createNewSession);
-            
-            // 清空当前会话
-            document.getElementById('clear-session-btn').addEventListener('click', clearCurrentSession);
-            
-            // 导出报告
-            document.getElementById('export-btn').addEventListener('click', function(e) {
-                e.stopPropagation();
-                const dropdown = document.getElementById('export-dropdown');
-                dropdown.classList.toggle('hidden');
-            });
-            
-            // 点击其他地方关闭导出下拉
-            document.addEventListener('click', function(e) {
-                const dd = document.getElementById('export-dropdown');
-                const container = document.getElementById('export-dropdown-container');
-                if (!dd.classList.contains('hidden') && !container.contains(e.target)) {
-                    dd.classList.add('hidden');
-                }
-            });
-            
-            document.getElementById('export-pdf-btn').addEventListener('click', function() {
-                exportReport('pdf');
-            });
-            
-            document.getElementById('export-docx-btn').addEventListener('click', function() {
-                exportReport('docx');
-            });
-            
-            // 导出路径选择器 - 点击展开下拉目录树
-            document.getElementById('export-path-display').addEventListener('click', function(e) {
-                e.stopPropagation();
-                togglePathTree(e);
-            });
-            
-            // 点击其他地方关闭下拉目录树
-            document.addEventListener('click', function(e) {
-                var tree = document.getElementById('export-path-tree');
-                var wrapper = document.getElementById('export-path-wrapper');
-                if (!tree.classList.contains('hidden') && !wrapper.contains(e.target)) {
-                    tree.classList.add('hidden');
-                }
-            });
-            
-            // 移动端会话列表切换
-            document.getElementById('mobile-session-toggle').addEventListener('click', function() {
-                const dropdown = document.getElementById('mobile-session-dropdown');
-                dropdown.classList.toggle('hidden');
-            });
-            
-            // 如果有上次的会话ID，自动加载
-            if (state.currentSessionId) {
-                switchSession(state.currentSessionId);
-            }
-        });
 
         // ============ 导出路径下拉目录树 ============
-        
+
         var exportPathState = {
             currentPath: '',
             history: JSON.parse(localStorage.getItem('export_path_history') || '[]'),
-            expandedDirs: {}  // 展开的目录缓存
         };
-        
+
         function togglePathTree(e) {
             if (e) e.stopPropagation();
             var tree = document.getElementById('export-path-tree');
-            if (tree.classList.contains('hidden')) {
-                tree.classList.remove('hidden');
-                loadTreeRoot();
+            if (tree.classList.contains('open')) {
+                tree.classList.remove('open');
             } else {
-                tree.classList.add('hidden');
+                tree.classList.add('open');
+                loadTreeRoot();
             }
         }
-        
+
         function clearExportPath() {
             exportPathState.currentPath = '';
             document.getElementById('export-path-text').textContent = '浏览器下载';
-            document.getElementById('export-path-text').className = 'flex-1 text-gray-400';
             var hint = document.getElementById('export-path-hint');
             hint.classList.add('hidden');
         }
-        
+
         function selectTreePath(path) {
             var textEl = document.getElementById('export-path-text');
             if (!path) {
@@ -1318,24 +1146,21 @@
             } else {
                 exportPathState.currentPath = path;
                 textEl.textContent = path;
-                textEl.className = 'flex-1 text-gray-700';
                 var hint = document.getElementById('export-path-hint');
                 hint.textContent = '📁 ' + path;
                 hint.classList.remove('hidden');
-                hint.className = 'text-xs mt-1 text-gray-400';
-                
                 var history = JSON.parse(localStorage.getItem('export_path_history') || '[]');
                 history = [path].concat(history.filter(function(h) { return h !== path; })).slice(0, 5);
                 localStorage.setItem('export_path_history', JSON.stringify(history));
                 exportPathState.history = history;
             }
-            document.getElementById('export-path-tree').classList.add('hidden');
+            document.getElementById('export-path-tree').classList.remove('open');
         }
-        
+
         function loadTreeRoot() {
             var content = document.getElementById('export-path-tree-content');
-            content.innerHTML = '<div class="text-center py-3 text-gray-400 text-xs"><i class="fas fa-spinner fa-spin"></i> 加载中...</div>';
-            
+            content.innerHTML = '<div class="text-center py-3 text-gray-500 text-xs"><i class="fas fa-spinner fa-spin"></i> 加载中...</div>';
+
             fetch(state.apiBaseUrl + '/api/export/browse', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -1344,90 +1169,59 @@
             .then(function(r) { return r.json(); })
             .then(function(data) {
                 var html = '';
-                
-                // 浏览器下载
-                html += '<div class="tree-item px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center gap-2 text-xs" onclick="selectTreePath(\'\')">' +
-                    '<span class="text-gray-400"><i class="fas fa-download"></i></span>' +
-                    '<span class="text-gray-600">浏览器下载</span></div>';
-                
-                html += '<div class="border-t border-gray-50 my-1"></div>';
-                
-                // 最近使用
+                html += '<div class="tree-item" onclick="selectTreePath(\'\')"><span class="text-gray-500"><i class="fas fa-download"></i></span><span>浏览器下载</span></div>';
+                html += '<div style="border-top:1px solid #2a2a4a;margin:4px 8px;"></div>';
+
                 if (exportPathState.history.length > 0) {
-                    html += '<div class="text-[10px] text-gray-400 px-3 py-1">最近使用</div>';
+                    html += '<div class="tree-section-label">最近使用</div>';
                     for (var i = 0; i < exportPathState.history.length; i++) {
                         var h = exportPathState.history[i];
-                        html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1.5 text-xs" onclick="selectTreePath(\'' + h + '\')">' +
-                            '<span class="text-yellow-500">📁</span>' +
-                            '<span class="text-gray-700 truncate">' + h + '</span></div>';
+                        html += '<div class="tree-item" onclick="selectTreePath(\'' + h + '\')"><span class="text-yellow-500">📁</span><span class="truncate">' + h + '</span></div>';
                     }
-                    html += '<div class="border-t border-gray-50 my-1"></div>';
+                    html += '<div style="border-top:1px solid #2a2a4a;margin:4px 8px;"></div>';
                 }
-                
-                // 快捷目录（可展开的树节点）
-                html += '<div class="text-[10px] text-gray-400 px-3 py-1">本地目录</div>';
+
+                html += '<div class="tree-section-label">本地目录</div>';
                 for (var i = 0; i < data.quick_dirs.length; i++) {
                     var qd = data.quick_dirs[i];
                     html += '<div class="tree-dir" data-path="' + qd.path + '">';
-                    html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-xs" onclick="toggleTreeNode(this)">' +
-                        '<span class="tree-arrow text-gray-300 w-3 text-center text-[10px]">▶</span>' +
-                        '<span class="text-yellow-500">📁</span>' +
-                        '<span class="text-gray-700 flex-1 truncate">' + qd.label + '</span>' +
-                        '<span class="text-gray-400 text-[10px] truncate max-w-[100px]">' + qd.path + '</span></div>';
-                    html += '<div class="tree-children hidden pl-5"></div>';
-                    html += '</div>';
+                    html += '<div class="tree-item" onclick="toggleTreeNode(this)"><span class="tree-arrow">▶</span><span class="text-yellow-500">📁</span><span class="truncate">' + qd.label + '</span></div>';
+                    html += '<div class="tree-children hidden"></div></div>';
                 }
-                
-                // Windows 盘符
+
                 if (data.windows_drives && data.windows_drives.length > 0) {
-                    html += '<div class="border-t border-gray-50 my-1"></div>';
-                    html += '<div class="text-[10px] text-gray-400 px-3 py-1">Windows 文件系统</div>';
+                    html += '<div style="border-top:1px solid #2a2a4a;margin:4px 8px;"></div>';
+                    html += '<div class="tree-section-label">Windows 文件系统</div>';
                     for (var i = 0; i < data.windows_drives.length; i++) {
                         var wd = data.windows_drives[i];
                         html += '<div class="tree-dir" data-path="' + wd.path + '">';
-                        html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-xs" onclick="toggleTreeNode(this)">' +
-                            '<span class="tree-arrow text-gray-300 w-3 text-center text-[10px]">▶</span>' +
-                            '<span class="text-blue-500">💿</span>' +
-                            '<span class="text-gray-700 flex-1 truncate">' + wd.label + '</span></div>';
-                        html += '<div class="tree-children hidden pl-5"></div>';
-                        html += '</div>';
+                        html += '<div class="tree-item" onclick="toggleTreeNode(this)"><span class="tree-arrow">▶</span><span class="text-blue-400">💿</span><span class="truncate">' + wd.label + '</span></div>';
+                        html += '<div class="tree-children hidden"></div></div>';
                     }
                 }
-                
-                // WSL 路径
+
                 if (data.wsl_paths && data.wsl_paths.length > 0) {
-                    html += '<div class="border-t border-gray-50 my-1"></div>';
-                    html += '<div class="text-[10px] text-gray-400 px-3 py-1">WSL 路径</div>';
+                    html += '<div style="border-top:1px solid #2a2a4a;margin:4px 8px;"></div>';
+                    html += '<div class="tree-section-label">WSL 路径</div>';
                     for (var i = 0; i < data.wsl_paths.length; i++) {
                         var wp = data.wsl_paths[i];
                         html += '<div class="tree-dir" data-path="' + wp.path + '">';
-                        html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-xs" onclick="toggleTreeNode(this)">' +
-                            '<span class="tree-arrow text-gray-300 w-3 text-center text-[10px]">▶</span>' +
-                            '<span class="text-green-600">🐧</span>' +
-                            '<span class="text-gray-700 flex-1 truncate">' + wp.label + '</span></div>';
-                        html += '<div class="tree-children hidden pl-5"></div>';
-                        html += '</div>';
+                        html += '<div class="tree-item" onclick="toggleTreeNode(this)"><span class="tree-arrow">▶</span><span class="text-green-400">🐧</span><span class="truncate">' + wp.label + '</span></div>';
+                        html += '<div class="tree-children hidden"></div></div>';
                     }
                 }
-                
-                // 根目录 / 手动输入
-                html += '<div class="border-t border-gray-50 mt-1"></div>';
+
+                html += '<div style="border-top:1px solid #2a2a4a;margin:4px 8px;"></div>';
                 html += '<div class="tree-dir" data-path="/">';
-                html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-xs" onclick="toggleTreeNode(this)">' +
-                    '<span class="tree-arrow text-gray-300 w-3 text-center text-[10px]">▶</span>' +
-                    '<span class="text-yellow-500">📁</span>' +
-                    '<span class="text-gray-700">/（根目录）</span></div>';
-                html += '<div class="tree-children hidden pl-5"></div>';
-                html += '</div>';
-                
-                // 手动输入
-                html += '<div class="px-3 py-1.5 flex gap-1 border-t border-gray-50 mt-1">' +
-                    '<input id="tree-manual-input" type="text" class="flex-1 text-[10px] px-1.5 py-1 border border-gray-200 rounded focus:outline-none focus:border-blue-400" placeholder="输入路径回车">' +
-                    '<button class="text-[10px] px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600" onclick="selectTreePath(document.getElementById(\'tree-manual-input\').value)">确定</button></div>';
-                
+                html += '<div class="tree-item" onclick="toggleTreeNode(this)"><span class="tree-arrow">▶</span><span class="text-yellow-500">📁</span><span>/（根目录）</span></div>';
+                html += '<div class="tree-children hidden"></div></div>';
+
+                html += '<div class="tree-manual-input">' +
+                    '<input id="tree-manual-input" type="text" placeholder="输入路径回车">' +
+                    '<button onclick="selectTreePath(document.getElementById(\'tree-manual-input\').value)">确定</button></div>';
+
                 content.innerHTML = html;
-                
-                // 回车键触发
+
                 setTimeout(function() {
                     var inp = document.getElementById('tree-manual-input');
                     if (inp) inp.addEventListener('keydown', function(e) {
@@ -1439,28 +1233,21 @@
                 content.innerHTML = '<div class="text-center py-3 text-red-400 text-xs">❌ ' + e.message + '</div>';
             });
         }
-        
+
         function toggleTreeNode(el) {
             var dirDiv = el.closest('.tree-dir');
             if (!dirDiv) return;
-            
             var children = dirDiv.querySelector('.tree-children');
             var arrow = el.querySelector('.tree-arrow');
-            
             if (!children.classList.contains('hidden')) {
                 children.classList.add('hidden');
                 if (arrow) arrow.textContent = '▶';
                 return;
             }
-            
-            // 展开
             if (arrow) arrow.textContent = '▼';
             children.classList.remove('hidden');
-            
-            // 如果还没加载子目录
             if (children.children.length === 0) {
-                children.innerHTML = '<div class="text-center py-2 text-gray-400 text-[10px]"><i class="fas fa-spinner fa-spin"></i></div>';
-                
+                children.innerHTML = '<div class="text-center py-2 text-gray-500 text-[10px]"><i class="fas fa-spinner fa-spin"></i></div>';
                 var path = dirDiv.getAttribute('data-path');
                 fetch(state.apiBaseUrl + '/api/export/browse', {
                     method: 'POST',
@@ -1470,39 +1257,80 @@
                 .then(function(r) { return r.json(); })
                 .then(function(data) {
                     var html = '';
-                    
-                    // 选择此目录
-                    html += '<div class="tree-item px-2 py-1 hover:bg-green-50 cursor-pointer flex items-center gap-1 text-[10px] text-green-600 rounded" onclick="selectTreePath(\'' + data.current_path + '\')">' +
-                        '<span>✅</span><span>选择此目录</span></div>';
-                    
-                    // 子目录
+                    html += '<div class="tree-item" onclick="selectTreePath(\'' + data.current_path + '\')" style="color:#6c63ff;"><span>✅</span><span>选择此目录</span></div>';
                     var hasDirs = false;
                     for (var i = 0; i < data.entries.length; i++) {
                         var entry = data.entries[i];
                         if (!entry.is_dir) continue;
                         hasDirs = true;
                         html += '<div class="tree-dir" data-path="' + entry.path + '">';
-                        html += '<div class="tree-item px-2 py-1 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-[10px]" onclick="toggleTreeNode(this)">' +
-                            '<span class="tree-arrow text-gray-300 w-2.5 text-center text-[8px]">▶</span>' +
-                            '<span class="text-yellow-500">📁</span>' +
-                            '<span class="text-gray-700 truncate">' + entry.name + '</span></div>';
-                        html += '<div class="tree-children hidden pl-4"></div>';
-                        html += '</div>';
+                        html += '<div class="tree-item" onclick="toggleTreeNode(this)"><span class="tree-arrow">▶</span><span class="text-yellow-500">📁</span><span class="truncate">' + entry.name + '</span></div>';
+                        html += '<div class="tree-children hidden"></div></div>';
                     }
-                    
-                    if (!hasDirs) {
-                        html += '<div class="px-2 py-1 text-gray-400 text-[10px]">（空目录）</div>';
-                    }
-                    
+                    if (!hasDirs) html += '<div class="tree-item" style="color:#5a5a7a;">（空目录）</div>';
                     children.innerHTML = html;
                 })
                 .catch(function(e) {
-                    children.innerHTML = '<div class="px-2 py-1 text-red-400 text-[10px]">❌ ' + e.message + '</div>';
+                    children.innerHTML = '<div class="tree-item" style="color:#e74c3c;">❌ ' + e.message + '</div>';
                 });
             }
         }
-        
-    </script>
 
+        // ============ 初始化 ============
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // 齿轮面板切换
+            el.gearBtn.addEventListener('click', function(e) {
+                e.stopPropagation();
+                el.paramsPanel.classList.toggle('open');
+            });
+            document.addEventListener('click', function(e) {
+                if (!el.paramsPanel.contains(e.target) && e.target !== el.gearBtn && !el.gearBtn.contains(e.target)) {
+                    el.paramsPanel.classList.remove('open');
+                }
+            });
+
+            // 回车提交
+            el.questionInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    submitQuestion();
+                }
+            });
+
+            // 导出下拉
+            document.getElementById('export-btn').addEventListener('click', function(e) {
+                e.stopPropagation();
+                var dd = document.getElementById('export-dropdown');
+                dd.classList.toggle('hidden');
+            });
+            document.addEventListener('click', function(e) {
+                var dd = document.getElementById('export-dropdown');
+                var container = document.getElementById('export-dropdown-container');
+                if (!dd.classList.contains('hidden') && !container.contains(e.target)) {
+                    dd.classList.add('hidden');
+                }
+            });
+
+            document.getElementById('export-pdf-btn').addEventListener('click', function() { exportReport('pdf'); });
+            document.getElementById('export-docx-btn').addEventListener('click', function() { exportReport('docx'); });
+
+            document.getElementById('export-path-display').addEventListener('click', function(e) {
+                e.stopPropagation();
+                togglePathTree(e);
+            });
+            document.addEventListener('click', function(e) {
+                var tree = document.getElementById('export-path-tree');
+                var wrapper = document.getElementById('export-path-wrapper');
+                if (tree.classList.contains('open') && !wrapper.contains(e.target)) {
+                    tree.classList.remove('open');
+                }
+            });
+
+            // 缓存统计
+            refreshCacheStats();
+            setInterval(refreshCacheStats, 15000);
+        });
+    </script>
 </body>
 </html>
