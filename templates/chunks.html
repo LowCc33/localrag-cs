@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LocalRAG-CS Chunk 管理</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome 图标 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ============ 全局 ============ */
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+        }
+
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4a4a6c; }
+
+        /* ============ 顶栏 ============ */
+        .topbar {
+            background: #1e1e2e;
+            border-bottom: 1px solid #2a2a4a;
+            padding: 0 20px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+        }
+        .topbar-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .topbar-logo .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #6c63ff, #7c6fff);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 16px;
+            color: #fff;
+        }
+        .topbar-logo .logo-text {
+            font-size: 16px;
+            font-weight: 700;
+            color: #e0e0e0;
+            letter-spacing: 0.5px;
+        }
+        .topbar-logo .logo-sub {
+            font-size: 11px;
+            color: #7a7a9a;
+            margin-left: 4px;
+        }
+        .topbar-btn {
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            border: 1px solid #3a3a5c;
+            background: transparent;
+            color: #9e9e9e;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            text-decoration: none;
+        }
+        .topbar-btn:hover {
+            border-color: #6c63ff;
+            color: #c0c0e0;
+        }
+
+        /* ============ 面板 ============ */
+        .panel {
+            background: #1e1e32;
+            border: 1px solid #3a3a5a;
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .panel-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #c0c0e0;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel-title i { color: #6c63ff; }
+
+        /* ============ 搜索框 ============ */
+        .search-box {
+            position: relative;
+        }
+        .search-box i {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #5a5a7a;
+            font-size: 14px;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 10px 12px 10px 36px;
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 13px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-box input:focus { border-color: #6c63ff; }
+        .search-box input::placeholder { color: #5a5a7a; }
+
+        /* ============ 按钮 ============ */
+        .btn-primary {
+            padding: 8px 20px;
+            background: #6c63ff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-primary:hover { background: #7c6fff; }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .btn-secondary {
+            padding: 8px 20px;
+            background: transparent;
+            color: #9e9e9e;
+            border: 1px solid #3a3a5c;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-secondary:hover { border-color: #6c63ff; color: #c0c0e0; }
+
+        .btn-sm {
+            padding: 4px 12px;
+            font-size: 11px;
+            border-radius: 6px;
+        }
+        .btn-xs {
+            padding: 3px 8px;
+            font-size: 10px;
+            border-radius: 5px;
+        }
+
+        .btn-danger {
+            padding: 6px 14px;
+            background: transparent;
+            color: #e74c3c;
+            border: 1px solid #5a3a3a;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-danger:hover { background: rgba(231,76,60,0.1); border-color: #e74c3c; }
+
+        .btn-success {
+            padding: 6px 14px;
+            background: #2d6a4f;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .btn-success:hover { background: #3a8a5f; }
+
+        /* ============ Chunk 列表项 ============ */
+        .chunk-item {
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 10px;
+            padding: 14px 16px;
+            transition: background 0.15s;
+        }
+        .chunk-item:hover { background: #32325a; }
+
+        .chunk-item .chunk-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        .chunk-item .chunk-title {
+            font-size: 13px;
+            font-weight: 600;
+            color: #c0c0e0;
+        }
+        .chunk-item .chunk-meta {
+            font-size: 11px;
+            color: #5a5a7a;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .chunk-item .chunk-meta span {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .chunk-item .chunk-content {
+            font-size: 12px;
+            color: #9e9e9e;
+            line-height: 1.6;
+            margin-top: 6px;
+            word-break: break-word;
+        }
+        .chunk-item .chunk-content .highlight {
+            background: rgba(108,99,255,0.25);
+            color: #c0c0ff;
+            padding: 0 2px;
+            border-radius: 2px;
+        }
+        .chunk-item .chunk-actions {
+            display: flex;
+            gap: 4px;
+            flex-shrink: 0;
+        }
+        .chunk-item .chunk-actions button {
+            padding: 4px 8px;
+            border-radius: 6px;
+            background: transparent;
+            border: none;
+            color: #5a5a7a;
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+        }
+        .chunk-item .chunk-actions button:hover { background: rgba(108,99,255,0.1); color: #c0c0e0; }
+        .chunk-item .chunk-actions .btn-view:hover { color: #6c63ff; }
+        .chunk-item .chunk-actions .btn-edit:hover { color: #d4a017; }
+        .chunk-item .chunk-actions .btn-del:hover { color: #e74c3c; background: rgba(231,76,60,0.1); }
+
+        /* 展开全文 */
+        .chunk-item .chunk-full {
+            display: none;
+            margin-top: 10px;
+            padding: 12px;
+            background: #1e1e2e;
+            border-radius: 8px;
+            font-size: 12px;
+            color: #c0c0e0;
+            line-height: 1.7;
+            white-space: pre-wrap;
+            word-break: break-word;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .chunk-item .chunk-full.show { display: block; }
+
+        /* ============ 分页 ============ */
+        .page-btn {
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            background: transparent;
+            border: 1px solid #3a3a5c;
+            color: #9e9e9e;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .page-btn:hover:not(:disabled) { border-color: #6c63ff; color: #c0c0e0; }
+        .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .page-btn.active { background: #6c63ff; border-color: #6c63ff; color: #fff; }
+        .page-info { font-size: 11px; color: #5a5a7a; }
+
+        /* ============ 弹窗 ============ */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal-content {
+            background: #1e1e32;
+            border: 1px solid #3a3a5a;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 700px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .modal-header h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #c0c0e0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .modal-header h3 i { color: #6c63ff; }
+        .modal-close {
+            width: 32px; height: 32px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: #5a5a7a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.15s;
+        }
+        .modal-close:hover { color: #c0c0e0; background: rgba(255,255,255,0.05); }
+        .modal-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+        .modal-footer {
+            display: flex;
+            align-items: center;
+            justify-content: flex-end;
+            gap: 8px;
+            padding: 12px 20px;
+            border-top: 1px solid #2a2a4a;
+        }
+
+        /* 编辑框 */
+        .edit-textarea {
+            width: 100%;
+            min-height: 200px;
+            padding: 12px;
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 13px;
+            line-height: 1.6;
+            outline: none;
+            resize: vertical;
+            font-family: inherit;
+            transition: border-color 0.2s;
+        }
+        .edit-textarea:focus { border-color: #6c63ff; }
+
+        /* ============ 通知 ============ */
+        .notification {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 100;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 13px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            transform: translateX(120%);
+            transition: transform 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-left: 4px solid;
+        }
+        .notification.show { transform: translateX(0); }
+        .notification-success { background: #1a3a2a; border-color: #52c41a; color: #b7eb8f; }
+        .notification-error { background: #3a1a1a; border-color: #e74c3c; color: #f5a5a5; }
+        .notification-warning { background: #3a2a1a; border-color: #d4a017; color: #f5d78e; }
+        .notification-info { background: #1a2a3a; border-color: #6c63ff; color: #b0b0ff; }
+
+        /* ============ 空状态 ============ */
+        .empty-state { text-align: center; padding: 48px 0; color: #5a5a7a; }
+        .empty-state i { font-size: 40px; margin-bottom: 12px; display: block; }
+        .empty-state p { font-size: 13px; }
+
+        /* ============ 加载中 ============ */
+        .loading-spinner { text-align: center; padding: 32px 0; color: #5a5a7a; }
+        .loading-spinner i { font-size: 24px; }
+
+        /* ============ 响应式 ============ */
+        @media (max-width: 640px) {
+            .chunk-item .chunk-header { flex-direction: column; gap: 8px; }
+            .chunk-item .chunk-actions { align-self: flex-end; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ============ 顶栏 ============ -->
+    <header class="topbar">
+        <div class="topbar-logo">
+            <div class="logo-icon">R</div>
+            <span class="logo-text">LocalRAG-CS</span>
+            <span class="logo-sub">Chunk 管理</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <a href="/" class="topbar-btn">
+                <i class="fas fa-comment-dots"></i>返回问答
+            </a>
+            <a href="/ingest" class="topbar-btn">
+                <i class="fas fa-cloud-upload-alt"></i>数据导入
+            </a>
+        </div>
+    </header>
+
+    <!-- ============ 主内容 ============ -->
+    <div style="max-width:1000px;margin:0 auto;padding:24px 20px;">
+
+        <!-- 搜索过滤区 -->
+        <div class="panel" style="margin-bottom:20px;">
+            <div class="panel-title"><i class="fas fa-search"></i>搜索过滤</div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;">
+                <div class="search-box" style="flex:1;min-width:200px;">
+                    <i class="fas fa-search"></i>
+                    <input type="text" id="keyword-input" placeholder="搜索 chunk 内容..." autocomplete="off">
+                </div>
+                <div class="search-box" style="flex:0 0 200px;">
+                    <i class="fas fa-file-alt"></i>
+                    <input type="text" id="doc-id-input" placeholder="按文档 ID 过滤..." autocomplete="off">
+                </div>
+                <button id="search-btn" class="btn-primary"><i class="fas fa-search"></i>搜索</button>
+                <button id="reset-btn" class="btn-secondary"><i class="fas fa-undo"></i>重置</button>
+            </div>
+        </div>
+
+        <!-- 结果统计 -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+            <div style="font-size:13px;color:#9e9e9e;">
+                共 <span id="total-count" style="color:#c0c0e0;font-weight:600;">0</span> 条结果
+            </div>
+            <button id="refresh-btn" class="btn-secondary btn-sm"><i class="fas fa-redo"></i>刷新</button>
+        </div>
+
+        <!-- Chunk 列表 -->
+        <div id="chunk-list" style="display:flex;flex-direction:column;gap:8px;">
+            <div class="empty-state">
+                <i class="fas fa-cubes"></i>
+                <p>输入关键词搜索 chunk</p>
+            </div>
+        </div>
+
+        <!-- 分页 -->
+        <div id="pagination" class="hidden" style="display:flex;justify-content:center;align-items:center;gap:8px;margin-top:20px;">
+            <button class="page-btn" id="prev-page" disabled><i class="fas fa-chevron-left"></i>上一页</button>
+            <div id="page-numbers" style="display:flex;gap:4px;"></div>
+            <button class="page-btn" id="next-page" disabled>下一页<i class="fas fa-chevron-right"></i></button>
+            <span class="page-info" id="page-info"></span>
+        </div>
+    </div>
+
+    <!-- ============ 编辑弹窗 ============ -->
+    <div id="edit-modal" class="hidden">
+        <div class="modal-overlay" id="edit-modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3><i class="fas fa-edit"></i>编辑 Chunk</h3>
+                    <button class="modal-close" id="edit-modal-close"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div style="font-size:12px;color:#7a7a9a;margin-bottom:8px;">
+                        <span id="edit-chunk-id-label"></span>
+                    </div>
+                    <textarea class="edit-textarea" id="edit-content" placeholder="输入新的 chunk 内容..."></textarea>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn-secondary" id="edit-cancel">取消</button>
+                    <button class="btn-success" id="edit-save"><i class="fas fa-save"></i>保存</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 通知容器 ============ -->
+    <div id="notification-container"></div>
+
+    <script>
+        // ============ 全局状态 ============
+        var currentPage = 1;
+        var pageSize = 20;
+        var totalCount = 0;
+        var totalPages = 0;
+        var searchKeyword = '';
+        var searchDocId = '';
+        var editingChunkId = null;
+
+        // ============ DOM 引用 ============
+        var keywordInput = document.getElementById('keyword-input');
+        var docIdInput = document.getElementById('doc-id-input');
+        var searchBtn = document.getElementById('search-btn');
+        var resetBtn = document.getElementById('reset-btn');
+        var refreshBtn = document.getElementById('refresh-btn');
+        var chunkList = document.getElementById('chunk-list');
+        var totalCountEl = document.getElementById('total-count');
+        var pagination = document.getElementById('pagination');
+        var prevPageBtn = document.getElementById('prev-page');
+        var nextPageBtn = document.getElementById('next-page');
+        var pageNumbers = document.getElementById('page-numbers');
+        var pageInfo = document.getElementById('page-info');
+
+        // ========== 初始化 ==========
+
+        function init() {
+            setupEventListeners();
+            // 默认加载全部
+            searchChunks();
+        }
+
+        function setupEventListeners() {
+            searchBtn.addEventListener('click', function() {
+                currentPage = 1;
+                searchChunks();
+            });
+            resetBtn.addEventListener('click', function() {
+                keywordInput.value = '';
+                docIdInput.value = '';
+                currentPage = 1;
+                searchChunks();
+            });
+            refreshBtn.addEventListener('click', function() {
+                searchChunks();
+            });
+
+            prevPageBtn.addEventListener('click', function() {
+                if (currentPage > 1) { currentPage--; searchChunks(); }
+            });
+            nextPageBtn.addEventListener('click', function() {
+                if (currentPage < totalPages) { currentPage++; searchChunks(); }
+            });
+
+            // 回车搜索
+            keywordInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') { currentPage = 1; searchChunks(); }
+            });
+            docIdInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter') { currentPage = 1; searchChunks(); }
+            });
+
+            // 编辑弹窗
+            document.getElementById('edit-modal-close').addEventListener('click', closeEditModal);
+            document.getElementById('edit-modal-overlay').addEventListener('click', closeEditModal);
+            document.getElementById('edit-cancel').addEventListener('click', closeEditModal);
+            document.getElementById('edit-save').addEventListener('click', saveEdit);
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape') {
+                    if (!document.getElementById('edit-modal').classList.contains('hidden')) {
+                        closeEditModal();
+                    }
+                }
+            });
+        }
+
+        // ========== 搜索 Chunk ==========
+
+        async function searchChunks() {
+            searchKeyword = keywordInput.value.trim();
+            searchDocId = docIdInput.value.trim();
+
+            chunkList.innerHTML = '<div class="loading-spinner"><i class="fas fa-spinner fa-spin"></i></div>';
+
+            try {
+                var params = new URLSearchParams();
+                params.set('page', currentPage);
+                params.set('size', pageSize);
+                if (searchKeyword) params.set('keyword', searchKeyword);
+                if (searchDocId) params.set('doc_id', searchDocId);
+
+                var resp = await fetch('/api/chunks?' + params.toString());
+                if (!resp.ok) throw new Error('请求失败: ' + resp.status);
+                var data = await resp.json();
+
+                totalCount = data.total || 0;
+                totalPages = Math.ceil(totalCount / pageSize) || 1;
+                totalCountEl.textContent = totalCount;
+
+                renderChunks(data.chunks || []);
+                renderPagination();
+            } catch (e) {
+                chunkList.innerHTML = '<div class="empty-state" style="color:#e74c3c;"><i class="fas fa-exclamation-triangle"></i><p>加载失败: ' + escapeHtml(e.message) + '</p></div>';
+            }
+        }
+
+        // ========== 渲染 Chunk 列表 ==========
+
+        function renderChunks(chunks) {
+            if (chunks.length === 0) {
+                chunkList.innerHTML = '<div class="empty-state"><i class="fas fa-inbox"></i><p>没有找到匹配的 chunk</p></div>';
+                return;
+            }
+
+            chunkList.innerHTML = chunks.map(function(chunk) {
+                var contentPreview = chunk.content.length > 150
+                    ? chunk.content.substring(0, 150) + '...'
+                    : chunk.content;
+                var highlightedPreview = highlightText(contentPreview, searchKeyword);
+                var timeStr = formatDate(chunk.create_time);
+
+                return '<div class="chunk-item" data-chunk-id="' + escapeHtml(chunk.chunk_id) + '">' +
+                    '<div class="chunk-header">' +
+                    '<div style="flex:1;min-width:0;">' +
+                    '<div class="chunk-title">' +
+                    '<i class="fas fa-file-alt" style="color:#5a5a7a;margin-right:6px;font-size:11px;"></i>' +
+                    escapeHtml(chunk.title || '未命名') +
+                    '</div>' +
+                    '<div class="chunk-meta">' +
+                    '<span><i class="fas fa-hashtag"></i> #' + chunk.chunk_index + '</span>' +
+                    '<span><i class="fas fa-file-code"></i> ' + escapeHtml(chunk.doc_id) + '</span>' +
+                    '<span><i class="fas fa-text-width"></i> ' + chunk.char_count + ' 字符</span>' +
+                    '<span><i class="far fa-clock"></i> ' + timeStr + '</span>' +
+                    '</div></div>' +
+                    '<div class="chunk-actions">' +
+                    '<button class="btn-view" onclick="toggleFullView(\'' + escapeHtml(chunk.chunk_id) + '\')" title="查看全文"><i class="fas fa-expand"></i></button>' +
+                    '<button class="btn-edit" onclick="openEditModal(\'' + escapeHtml(chunk.chunk_id) + '\')" title="编辑"><i class="fas fa-edit"></i></button>' +
+                    '<button class="btn-del" onclick="deleteChunk(\'' + escapeHtml(chunk.chunk_id) + '\')" title="删除"><i class="fas fa-trash-alt"></i></button>' +
+                    '</div></div>' +
+                    '<div class="chunk-content">' + highlightedPreview + '</div>' +
+                    '<div class="chunk-full" id="full-' + escapeHtml(chunk.chunk_id) + '">' + escapeHtml(chunk.content) + '</div>' +
+                    '</div>';
+            }).join('');
+        }
+
+        function highlightText(text, keyword) {
+            if (!keyword) return escapeHtml(text);
+            var escaped = escapeHtml(text);
+            var kw = escapeHtml(keyword);
+            var regex = new RegExp('(' + kw.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+            return escaped.replace(regex, '<span class="highlight">$1</span>');
+        }
+
+        function toggleFullView(chunkId) {
+            var el = document.getElementById('full-' + chunkId);
+            if (el) el.classList.toggle('show');
+        }
+
+        // ========== 分页 ==========
+
+        function renderPagination() {
+            if (totalCount === 0) {
+                pagination.classList.add('hidden');
+                return;
+            }
+            pagination.classList.remove('hidden');
+
+            prevPageBtn.disabled = currentPage <= 1;
+            nextPageBtn.disabled = currentPage >= totalPages;
+
+            // 页码按钮（最多显示 7 个）
+            var start = Math.max(1, currentPage - 3);
+            var end = Math.min(totalPages, currentPage + 3);
+            if (end - start < 6) {
+                if (start === 1) end = Math.min(totalPages, start + 6);
+                else start = Math.max(1, end - 6);
+            }
+
+            pageNumbers.innerHTML = '';
+            for (var i = start; i <= end; i++) {
+                var btn = document.createElement('button');
+                btn.className = 'page-btn' + (i === currentPage ? ' active' : '');
+                btn.textContent = i;
+                btn.addEventListener('click', (function(page) {
+                    return function() { currentPage = page; searchChunks(); };
+                })(i));
+                pageNumbers.appendChild(btn);
+            }
+
+            pageInfo.textContent = '第 ' + currentPage + '/' + totalPages + ' 页';
+        }
+
+        // ========== 编辑弹窗 ==========
+
+        function openEditModal(chunkId) {
+            editingChunkId = chunkId;
+            document.getElementById('edit-chunk-id-label').textContent = 'Chunk ID: ' + chunkId;
+            document.getElementById('edit-content').value = '';
+            document.getElementById('edit-modal').classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+
+            // 加载当前内容
+            fetch('/api/chunks/' + encodeURIComponent(chunkId))
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    document.getElementById('edit-content').value = data.content || '';
+                })
+                .catch(function(e) {
+                    showNotification('加载 chunk 内容失败: ' + e.message, 'error');
+                });
+        }
+
+        function closeEditModal() {
+            document.getElementById('edit-modal').classList.add('hidden');
+            document.body.style.overflow = '';
+            editingChunkId = null;
+        }
+
+        async function saveEdit() {
+            if (!editingChunkId) return;
+            var content = document.getElementById('edit-content').value.trim();
+            if (!content) { showNotification('内容不能为空', 'warning'); return; }
+
+            var saveBtn = document.getElementById('edit-save');
+            saveBtn.disabled = true;
+            saveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>保存中...';
+
+            try {
+                var resp = await fetch('/api/chunks/' + encodeURIComponent(editingChunkId), {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ content: content })
+                });
+                if (!resp.ok) throw new Error('保存失败: ' + resp.status);
+                var result = await resp.json();
+                if (result.success) {
+                    showNotification('chunk 更新成功', 'success');
+                    closeEditModal();
+                    searchChunks();
+                } else {
+                    showNotification('保存失败: ' + (result.message || '未知错误'), 'error');
+                }
+            } catch (e) {
+                showNotification('保存失败: ' + e.message, 'error');
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.innerHTML = '<i class="fas fa-save"></i>保存';
+            }
+        }
+
+        // ========== 删除 Chunk ==========
+
+        async function deleteChunk(chunkId) {
+            if (!confirm('确定要删除这个 chunk 吗？此操作不可撤销。')) return;
+
+            try {
+                var resp = await fetch('/api/chunks/' + encodeURIComponent(chunkId), {
+                    method: 'DELETE'
+                });
+                if (!resp.ok) throw new Error('删除失败: ' + resp.status);
+                var result = await resp.json();
+                if (result.success) {
+                    showNotification('chunk 已删除', 'success');
+                    searchChunks();
+                } else {
+                    showNotification('删除失败: ' + (result.message || '未知错误'), 'error');
+                }
+            } catch (e) {
+                showNotification('删除失败: ' + e.message, 'error');
+            }
+        }
+
+        // ========== 工具函数 ==========
+
+        function formatDate(dateString) {
+            if (!dateString) return '未知';
+            try {
+                var date = new Date(dateString);
+                var now = new Date();
+                var diffMs = now - date;
+                var diffMins = Math.floor(diffMs / 60000);
+                var diffHours = Math.floor(diffMs / 3600000);
+                var diffDays = Math.floor(diffMs / 86400000);
+                if (diffMins < 1) return '刚刚';
+                if (diffMins < 60) return diffMins + '分钟前';
+                if (diffHours < 24) return diffHours + '小时前';
+                if (diffDays < 7) return diffDays + '天前';
+                return date.toLocaleDateString('zh-CN');
+            } catch (e) { return dateString; }
+        }
+
+        function showNotification(message, type) {
+            type = type || 'info';
+            var container = document.getElementById('notification-container');
+            var n = document.createElement('div');
+            n.className = 'notification notification-' + type;
+            var icons = { success: 'fas fa-check-circle', error: 'fas fa-exclamation-circle', warning: 'fas fa-exclamation-triangle', info: 'fas fa-info-circle' };
+            n.innerHTML = '<i class="' + (icons[type] || icons.info) + '"></i>' + escapeHtml(message);
+            container.appendChild(n);
+            setTimeout(function() { n.classList.add('show'); }, 10);
+            setTimeout(function() {
+                n.classList.remove('show');
+                setTimeout(function() { if (n.parentNode) n.parentNode.removeChild(n); }, 300);
+            }, 3000);
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            var div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // ========== 启动 ==========
+        document.addEventListener('DOMContentLoaded', init);
+    </script>
+</body>
+</html>

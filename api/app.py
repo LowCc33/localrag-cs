@@ -50,7 +50,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from dependencies import initialize_clients, get_client_manager
 
 # 导入路由
-from routes import health, ask, cache as cache_route, session as session_route, export as export_route
+from routes import health, ask, cache as cache_route, session as session_route, export as export_route, chunks as chunks_route
 from api import ingest_router
 
 
@@ -211,18 +211,25 @@ app.include_router(session_route.router)
 # 包含导出路由（/api/export/pdf /api/export/docx）
 app.include_router(export_route.router)
 
+# 包含 chunk 管理路由（/api/chunks）
+app.include_router(chunks_route.router)
+
 
 # ============== 页面路由 ==============
 
 @app.get("/", response_class=HTMLResponse)
 @app.get("/ingest", response_class=HTMLResponse)
+@app.get("/chunks", response_class=HTMLResponse)
 async def admin_page(request: Request):
     """
-    后台管理首页 / 知识库管理页面
-    两个路径共用同一套页面 / 兼容旧入口
-    返回后台管理界面的 HTML 页面
+    后台管理首页 / 知识库管理页面 / Chunk 管理页面
+    返回对应页面的 HTML
     """
-    page_file = "ingest.html" if request.url.path == "/ingest" else "index.html"
+    page_map = {
+        "/ingest": "ingest.html",
+        "/chunks": "chunks.html"
+    }
+    page_file = page_map.get(request.url.path, "index.html")
     return templates.TemplateResponse(
         request=request,
         name=page_file,
