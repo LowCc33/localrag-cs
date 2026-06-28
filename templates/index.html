@@ -566,16 +566,196 @@
             border-radius: 4px;
         }
         .cache-stat-inline .flush-btn:hover { background: rgba(231,76,60,0.1); }
+
+        /* ============ 侧边栏 ============ */
+        .app-layout {
+            display: flex;
+            flex: 1;
+            overflow: hidden;
+        }
+        .sidebar {
+            width: 280px;
+            background: #1e1e2e;
+            border-right: 1px solid #2a2a4a;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+            transition: transform 0.3s ease;
+        }
+        .sidebar-header {
+            padding: 14px 16px;
+            border-bottom: 1px solid #2a2a4a;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .sidebar-header h3 {
+            font-size: 13px;
+            font-weight: 600;
+            color: #9e9e9e;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .sidebar-new-btn {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: transparent;
+            border: 1px solid #3a3a5c;
+            color: #9e9e9e;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            transition: all 0.2s;
+        }
+        .sidebar-new-btn:hover {
+            background: rgba(108,99,255,0.1);
+            border-color: #6c63ff;
+            color: #c0c0e0;
+        }
+        .sidebar-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px 0;
+        }
+        .sidebar-list::-webkit-scrollbar { width: 4px; }
+        .sidebar-list::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 2px; }
+
+        .session-item {
+            padding: 10px 16px;
+            cursor: pointer;
+            border-left: 3px solid transparent;
+            transition: background 0.15s;
+            display: flex;
+            align-items: flex-start;
+            gap: 8px;
+        }
+        .session-item:hover {
+            background: rgba(255,255,255,0.03);
+        }
+        .session-item.active {
+            background: rgba(108,99,255,0.08);
+            border-left-color: #6c63ff;
+        }
+        .session-item .session-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 6px;
+            background: #2a2a4a;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            flex-shrink: 0;
+            color: #6c63ff;
+        }
+        .session-item .session-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .session-item .session-title {
+            font-size: 13px;
+            color: #c0c0e0;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1.3;
+        }
+        .session-item .session-meta {
+            font-size: 10px;
+            color: #5a5a7a;
+            margin-top: 2px;
+        }
+        .session-item .session-del {
+            opacity: 0;
+            width: 22px;
+            height: 22px;
+            border-radius: 4px;
+            background: transparent;
+            border: none;
+            color: #5a5a7a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 10px;
+            flex-shrink: 0;
+            transition: all 0.15s;
+            margin-top: 2px;
+        }
+        .session-item:hover .session-del {
+            opacity: 1;
+        }
+        .session-item .session-del:hover {
+            color: #e74c3c;
+            background: rgba(231,76,60,0.1);
+        }
+
+        /* 汉堡按钮（移动端/窄屏） */
+        .sidebar-toggle {
+            display: none;
+            width: 32px;
+            height: 32px;
+            border-radius: 6px;
+            background: transparent;
+            border: 1px solid #3a3a5c;
+            color: #9e9e9e;
+            cursor: pointer;
+            align-items: center;
+            justify-content: center;
+            font-size: 14px;
+            transition: all 0.2s;
+        }
+        .sidebar-toggle:hover {
+            border-color: #6c63ff;
+            color: #c0c0e0;
+        }
+
+        /* 右侧主区域 */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            min-width: 0;
+        }
+
+        /* 响应式：窄屏隐藏侧边栏，显示汉堡按钮 */
+        @media (max-width: 768px) {
+            .sidebar {
+                position: fixed;
+                left: 0;
+                top: 56px;
+                bottom: 0;
+                z-index: 30;
+                transform: translateX(-100%);
+                box-shadow: 4px 0 20px rgba(0,0,0,0.3);
+            }
+            .sidebar.open {
+                transform: translateX(0);
+            }
+            .sidebar-toggle {
+                display: flex;
+            }
+        }
     </style>
 </head>
 <body>
 
     <!-- ============ 顶栏 ============ -->
     <header class="topbar">
-        <div class="topbar-logo">
-            <div class="logo-icon">R</div>
-            <span class="logo-text">LocalRAG-CS</span>
-            <span class="logo-sub">智能问答</span>
+        <div style="display:flex;align-items:center;gap:12px;">
+            <button class="sidebar-toggle" id="sidebar-toggle" onclick="toggleSidebar()" title="切换侧边栏">
+                <i class="fas fa-bars"></i>
+            </button>
+            <div class="topbar-logo">
+                <div class="logo-icon">R</div>
+                <span class="logo-text">LocalRAG-CS</span>
+                <span class="logo-sub">智能问答</span>
+            </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;">
             <button class="topbar-btn" onclick="window.location.href='/ingest'">
@@ -613,22 +793,42 @@
         </div>
     </header>
 
-    <!-- ============ 对话区 ============ -->
-    <div class="chat-area" id="chat-area">
-        <div class="chat-container" id="chat-container">
-            <!-- 空状态 -->
-            <div class="empty-state" id="empty-state">
-                <div class="empty-icon">💬</div>
-                <h2>开始问答</h2>
-                <p>输入您的问题，LocalRAG 将检索知识库并生成答案</p>
+    <!-- ============ 主体布局（侧边栏 + 主内容） ============ -->
+    <div class="app-layout">
+        <!-- 侧边栏 -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3><i class="fas fa-comments"></i> 会话历史</h3>
+                <button class="sidebar-new-btn" onclick="createNewSession()" title="新建会话">
+                    <i class="fas fa-plus"></i>
+                </button>
             </div>
-            <!-- 对话流消息将动态插入到这里 -->
-            <div id="message-list"></div>
-        </div>
-    </div>
+            <div class="sidebar-list" id="sidebar-list">
+                <div class="text-center text-gray-500 py-8 text-xs">
+                    <i class="fas fa-spinner fa-spin text-sm mb-2"></i>
+                    <p>加载中...</p>
+                </div>
+            </div>
+        </aside>
 
-    <!-- ============ 输入区 ============ -->
-    <div class="input-area">
+        <!-- 主内容区 -->
+        <div class="main-content">
+            <!-- ============ 对话区 ============ -->
+            <div class="chat-area" id="chat-area">
+                <div class="chat-container" id="chat-container">
+                    <!-- 空状态 -->
+                    <div class="empty-state" id="empty-state">
+                        <div class="empty-icon">💬</div>
+                        <h2>开始问答</h2>
+                        <p>输入您的问题，LocalRAG 将检索知识库并生成答案</p>
+                    </div>
+                    <!-- 对话流消息将动态插入到这里 -->
+                    <div id="message-list"></div>
+                </div>
+            </div>
+
+            <!-- ============ 输入区 ============ -->
+            <div class="input-area">
         <!-- 参数面板（齿轮弹出） -->
         <div class="params-panel" id="params-panel">
             <div class="param-row">
@@ -663,6 +863,7 @@
             <button class="send-btn" id="submit-btn" onclick="submitQuestion()">
                 <i class="fas fa-arrow-up"></i>
             </button>
+        </div>
         </div>
     </div>
 
@@ -1051,9 +1252,163 @@
 
         // ============ 会话管理 ============
 
+        // 加载会话列表
         async function loadSessions() {
-            // 简单会话列表存在 localStorage 中，仅用于跟踪当前会话
-            // 完整会话管理功能保留但不显示在界面上
+            try {
+                var resp = await fetch(state.apiBaseUrl + '/api/sessions?limit=50');
+                if (!resp.ok) throw new Error('加载失败');
+                var data = await resp.json();
+                renderSessionList(data.sessions || []);
+            } catch (e) {
+                document.getElementById('sidebar-list').innerHTML =
+                    '<div class="text-center text-gray-500 py-8 text-xs"><i class="fas fa-exclamation-triangle text-sm mb-2"></i><p>加载失败</p></div>';
+            }
+        }
+
+        // 渲染会话列表
+        function renderSessionList(sessions) {
+            var el = document.getElementById('sidebar-list');
+            if (!sessions.length) {
+                el.innerHTML =
+                    '<div class="text-center text-gray-500 py-8 text-xs"><i class="fas fa-inbox text-sm mb-2"></i><p>暂无会话</p><p class="text-xs mt-1" style="color:#5a5a7a;">开始问答后自动创建</p></div>';
+                return;
+            }
+
+            el.innerHTML = sessions.map(function(s) {
+                var isActive = s.id === state.currentSessionId;
+                var timeAgo = formatTimeAgo(s.updated_at);
+                return '<div class="session-item' + (isActive ? ' active' : '') + '" data-session-id="' + s.id + '">' +
+                    '<div class="session-icon"><i class="fas fa-comment"></i></div>' +
+                    '<div class="session-info">' +
+                    '<div class="session-title">' + escapeHtml(s.title) + '</div>' +
+                    '<div class="session-meta">' + timeAgo + ' · ' + (s.message_count || 0) + ' 条</div>' +
+                    '</div>' +
+                    '<button class="session-del" onclick="event.stopPropagation();deleteSession(\'' + s.id + '\')" title="删除会话">' +
+                    '<i class="fas fa-times"></i></button>' +
+                    '</div>';
+            }).join('');
+
+            // 绑定点击切换
+            el.querySelectorAll('.session-item').forEach(function(item) {
+                item.addEventListener('click', function() {
+                    switchSession(item.dataset.sessionId);
+                });
+            });
+        }
+
+        // 切换会话
+        async function switchSession(sessionId) {
+            state.currentSessionId = sessionId;
+            localStorage.setItem('lastSessionId', sessionId);
+
+            // 更新侧边栏高亮
+            document.querySelectorAll('.session-item').forEach(function(el) {
+                el.classList.remove('active');
+                if (el.dataset.sessionId === sessionId) {
+                    el.classList.add('active');
+                }
+            });
+
+            // 窄屏自动收起侧边栏
+            if (window.innerWidth <= 768) {
+                document.getElementById('sidebar').classList.remove('open');
+            }
+
+            // 清空消息列表
+            el.messageList.innerHTML = '';
+            el.emptyState.style.display = 'none';
+
+            // 加载历史
+            try {
+                var resp = await fetch(state.apiBaseUrl + '/api/session/' + sessionId + '/history');
+                if (resp.status === 404) {
+                    state.currentSessionId = null;
+                    localStorage.removeItem('lastSessionId');
+                    el.messageList.innerHTML = '';
+                    el.emptyState.style.display = 'flex';
+                    loadSessions();
+                    return;
+                }
+                if (resp.ok) {
+                    var data = await resp.json();
+                    if (data.history && data.history.length > 0) {
+                        el.emptyState.style.display = 'none';
+                        for (var i = 0; i < data.history.length; i++) {
+                            var msg = data.history[i];
+                            if (msg.role === 'user') {
+                                addUserMessage(msg.content);
+                            } else if (msg.role === 'assistant') {
+                                var aiMsg = addAiMessage();
+                                aiMsg.content.textContent = msg.content;
+                                // 如果有来源/耗时信息，从消息元数据中提取
+                                if (msg.metadata) {
+                                    if (msg.metadata.latency) {
+                                        renderLatencyInline(msg.metadata.latency, aiMsg.footer);
+                                    }
+                                    if (msg.metadata.sources && msg.metadata.sources.length > 0) {
+                                        renderSourcesInline(msg.metadata.sources, aiMsg.sources);
+                                    }
+                                    if (msg.metadata.cache_status) {
+                                        renderCacheBadgeInline(msg.metadata.cache_status, msg.metadata.response_time_ms, aiMsg.footer);
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        el.emptyState.style.display = 'flex';
+                    }
+                }
+            } catch (e) {
+                console.warn('加载历史失败:', e);
+                el.emptyState.style.display = 'flex';
+            }
+
+            loadSessions();
+        }
+
+        // 创建新会话
+        async function createNewSession() {
+            try {
+                var resp = await fetch(state.apiBaseUrl + '/api/session/new', { method: 'POST' });
+                if (!resp.ok) throw new Error('创建失败');
+                var data = await resp.json();
+                state.currentSessionId = data.session_id;
+                localStorage.setItem('lastSessionId', data.session_id);
+
+                // 清空
+                el.messageList.innerHTML = '';
+                el.emptyState.style.display = 'flex';
+                el.questionInput.value = '';
+
+                loadSessions();
+            } catch (e) {
+                console.error('创建会话失败:', e);
+            }
+        }
+
+        // 删除会话
+        async function deleteSession(sessionId) {
+            if (!confirm('确定删除此会话？')) return;
+            try {
+                var resp = await fetch(state.apiBaseUrl + '/api/session/' + sessionId, { method: 'DELETE' });
+                if (!resp.ok) throw new Error('删除失败');
+
+                if (sessionId === state.currentSessionId) {
+                    state.currentSessionId = null;
+                    localStorage.removeItem('lastSessionId');
+                    el.messageList.innerHTML = '';
+                    el.emptyState.style.display = 'flex';
+                }
+
+                loadSessions();
+            } catch (e) {
+                alert('删除失败: ' + e.message);
+            }
+        }
+
+        // 切换侧边栏（移动端）
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
         }
 
         // ============ 导出 ============
@@ -1330,6 +1685,29 @@
             // 缓存统计
             refreshCacheStats();
             setInterval(refreshCacheStats, 15000);
+
+            // 加载会话列表
+            loadSessions();
+
+            // 如果有上次的会话ID，自动加载
+            if (state.currentSessionId) {
+                switchSession(state.currentSessionId);
+            }
+
+            // 点击侧边栏外部关闭（移动端）
+            document.getElementById('sidebar').addEventListener('click', function(e) {
+                e.stopPropagation();
+            });
+            document.addEventListener('click', function(e) {
+                var sidebar = document.getElementById('sidebar');
+                var toggle = document.getElementById('sidebar-toggle');
+                if (window.innerWidth <= 768 &&
+                    sidebar.classList.contains('open') &&
+                    !sidebar.contains(e.target) &&
+                    !toggle.contains(e.target)) {
+                    sidebar.classList.remove('open');
+                }
+            });
         });
     </script>
 </body>
