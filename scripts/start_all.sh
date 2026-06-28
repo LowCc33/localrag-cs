@@ -59,7 +59,7 @@ echo ""
 echo "【2/5】启动Embedding向量模型（端口8081, CPU模式）..."
 $LLAMA_SERVER \
   -m $MODEL_BASE/Qwen3-Embedding-0.6B-GGUF/Qwen3-Embedding-0.6B-Q8_0.gguf \
-  --port 8081 --embedding --n-gpu-layers 99 -c 512 \
+  --port 8081 --embedding --n-gpu-layers 99 -c 768 \
   > /tmp/llama_emb.log 2>&1 &
 EMB_PID=$!
 echo "  ✅ Embedding进程已创建（PID: $EMB_PID）"

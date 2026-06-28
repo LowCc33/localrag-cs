@@ -233,13 +233,32 @@
                             <button id="export-btn" class="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-600 rounded-lg hover:bg-gray-50 transition-colors" title="导出报告">
                                 <i class="fas fa-download mr-1"></i>导出
                             </button>
-                            <div id="export-dropdown" class="hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-32">
-                                <button id="export-pdf-btn" class="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left flex items-center gap-2">
-                                    <i class="fas fa-file-pdf text-red-500"></i>导出 PDF
-                                </button>
-                                <button id="export-docx-btn" class="w-full px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 text-left flex items-center gap-2">
-                                    <i class="fas fa-file-word text-blue-500"></i>导出 Word
-                                </button>
+                            <div id="export-dropdown" class="hidden absolute right-0 top-full mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-10 w-80 p-3">
+                                <div class="mb-2">
+                                    <label class="text-xs text-gray-500 block mb-1">保存到</label>
+                                    <div class="relative" id="export-path-wrapper">
+                                        <div class="flex items-center gap-1 text-xs px-2.5 py-1.5 border border-gray-200 rounded-lg cursor-pointer hover:border-blue-300 bg-white" id="export-path-display">
+                                            <i class="fas fa-folder text-yellow-500"></i>
+                                            <span id="export-path-text" class="flex-1 text-gray-400">浏览器下载</span>
+                                            <i class="fas fa-chevron-down text-gray-300 text-[10px]"></i>
+                                        </div>
+                                        <!-- 下拉目录树 -->
+                                        <div id="export-path-tree" class="hidden absolute left-0 top-full mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg z-20 max-h-72 overflow-y-auto">
+                                            <div id="export-path-tree-content" class="py-1">
+                                                <div class="text-center py-3 text-gray-400 text-xs"><i class="fas fa-spinner fa-spin"></i> 加载中...</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div id="export-path-hint" class="text-xs mt-1 hidden"></div>
+                                </div>
+                                <div class="flex gap-1">
+                                    <button id="export-pdf-btn" class="flex-1 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg flex items-center justify-center gap-1.5 border border-gray-100">
+                                        <i class="fas fa-file-pdf text-red-500"></i>PDF
+                                    </button>
+                                    <button id="export-docx-btn" class="flex-1 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-lg flex items-center justify-center gap-1.5 border border-gray-100">
+                                        <i class="fas fa-file-word text-blue-500"></i>Word
+                                    </button>
+                                </div>
                             </div>
                         </div>
                         <button id="clear-session-btn" class="text-xs px-2.5 py-1.5 border border-gray-200 text-gray-500 rounded-lg hover:bg-gray-50 transition-colors">
@@ -1116,14 +1135,20 @@
             exportBtn.disabled = true;
             
             try {
+                const savePath = exportPathState.currentPath;
+                const body = {
+                    session_id: state.currentSessionId,
+                    title: document.getElementById('current-session-title').textContent || '问答报告',
+                    include_sources: true
+                };
+                if (savePath) {
+                    body.save_path = savePath;
+                }
+                
                 const resp = await fetch(`${state.apiBaseUrl}/api/export/${format}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        session_id: state.currentSessionId,
-                        title: document.getElementById('current-session-title').textContent || '问答报告',
-                        include_sources: true
-                    })
+                    body: JSON.stringify(body)
                 });
                 
                 if (!resp.ok) {
@@ -1131,19 +1156,28 @@
                     throw new Error(err.detail || '导出失败');
                 }
                 
-                // 触发文件下载
-                const blob = await resp.blob();
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                // 从 Content-Disposition 获取文件名
-                const disposition = resp.headers.get('Content-Disposition');
-                const filenameMatch = disposition && disposition.match(/filename="?([^"]+)"?/);
-                a.download = filenameMatch ? filenameMatch[1] : `report.${format}`;
-                document.body.appendChild(a);
-                a.click();
-                document.body.removeChild(a);
-                URL.revokeObjectURL(url);
+                if (savePath) {
+                    // 保存到服务器路径模式
+                    const result = await resp.json();
+                    const hint = document.getElementById('export-path-hint');
+                    hint.textContent = `✅ 已保存到: ${result.filepath}`;
+                    hint.classList.remove('hidden');
+                    hint.classList.add('text-green-500');
+                    setTimeout(() => { hint.classList.add('hidden'); }, 5000);
+                } else {
+                    // 浏览器下载模式
+                    const blob = await resp.blob();
+                    const url = URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const disposition = resp.headers.get('Content-Disposition');
+                    const filenameMatch = disposition && disposition.match(/filename="?([^"]+)"?/);
+                    a.download = filenameMatch ? filenameMatch[1] : `report.${format}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    document.body.removeChild(a);
+                    URL.revokeObjectURL(url);
+                }
                 
             } catch (e) {
                 alert('导出失败: ' + e.message);
@@ -1207,8 +1241,12 @@
             });
             
             // 点击其他地方关闭导出下拉
-            document.addEventListener('click', function() {
-                document.getElementById('export-dropdown').classList.add('hidden');
+            document.addEventListener('click', function(e) {
+                const dd = document.getElementById('export-dropdown');
+                const container = document.getElementById('export-dropdown-container');
+                if (!dd.classList.contains('hidden') && !container.contains(e.target)) {
+                    dd.classList.add('hidden');
+                }
             });
             
             document.getElementById('export-pdf-btn').addEventListener('click', function() {
@@ -1217,6 +1255,21 @@
             
             document.getElementById('export-docx-btn').addEventListener('click', function() {
                 exportReport('docx');
+            });
+            
+            // 导出路径选择器 - 点击展开下拉目录树
+            document.getElementById('export-path-display').addEventListener('click', function(e) {
+                e.stopPropagation();
+                togglePathTree(e);
+            });
+            
+            // 点击其他地方关闭下拉目录树
+            document.addEventListener('click', function(e) {
+                var tree = document.getElementById('export-path-tree');
+                var wrapper = document.getElementById('export-path-wrapper');
+                if (!tree.classList.contains('hidden') && !wrapper.contains(e.target)) {
+                    tree.classList.add('hidden');
+                }
             });
             
             // 移动端会话列表切换
@@ -1230,6 +1283,226 @@
                 switchSession(state.currentSessionId);
             }
         });
+
+        // ============ 导出路径下拉目录树 ============
+        
+        var exportPathState = {
+            currentPath: '',
+            history: JSON.parse(localStorage.getItem('export_path_history') || '[]'),
+            expandedDirs: {}  // 展开的目录缓存
+        };
+        
+        function togglePathTree(e) {
+            if (e) e.stopPropagation();
+            var tree = document.getElementById('export-path-tree');
+            if (tree.classList.contains('hidden')) {
+                tree.classList.remove('hidden');
+                loadTreeRoot();
+            } else {
+                tree.classList.add('hidden');
+            }
+        }
+        
+        function clearExportPath() {
+            exportPathState.currentPath = '';
+            document.getElementById('export-path-text').textContent = '浏览器下载';
+            document.getElementById('export-path-text').className = 'flex-1 text-gray-400';
+            var hint = document.getElementById('export-path-hint');
+            hint.classList.add('hidden');
+        }
+        
+        function selectTreePath(path) {
+            var textEl = document.getElementById('export-path-text');
+            if (!path) {
+                clearExportPath();
+            } else {
+                exportPathState.currentPath = path;
+                textEl.textContent = path;
+                textEl.className = 'flex-1 text-gray-700';
+                var hint = document.getElementById('export-path-hint');
+                hint.textContent = '📁 ' + path;
+                hint.classList.remove('hidden');
+                hint.className = 'text-xs mt-1 text-gray-400';
+                
+                var history = JSON.parse(localStorage.getItem('export_path_history') || '[]');
+                history = [path].concat(history.filter(function(h) { return h !== path; })).slice(0, 5);
+                localStorage.setItem('export_path_history', JSON.stringify(history));
+                exportPathState.history = history;
+            }
+            document.getElementById('export-path-tree').classList.add('hidden');
+        }
+        
+        function loadTreeRoot() {
+            var content = document.getElementById('export-path-tree-content');
+            content.innerHTML = '<div class="text-center py-3 text-gray-400 text-xs"><i class="fas fa-spinner fa-spin"></i> 加载中...</div>';
+            
+            fetch(state.apiBaseUrl + '/api/export/browse', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ path: '' })
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                var html = '';
+                
+                // 浏览器下载
+                html += '<div class="tree-item px-3 py-2 hover:bg-blue-50 cursor-pointer flex items-center gap-2 text-xs" onclick="selectTreePath(\'\')">' +
+                    '<span class="text-gray-400"><i class="fas fa-download"></i></span>' +
+                    '<span class="text-gray-600">浏览器下载</span></div>';
+                
+                html += '<div class="border-t border-gray-50 my-1"></div>';
+                
+                // 最近使用
+                if (exportPathState.history.length > 0) {
+                    html += '<div class="text-[10px] text-gray-400 px-3 py-1">最近使用</div>';
+                    for (var i = 0; i < exportPathState.history.length; i++) {
+                        var h = exportPathState.history[i];
+                        html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1.5 text-xs" onclick="selectTreePath(\'' + h + '\')">' +
+                            '<span class="text-yellow-500">📁</span>' +
+                            '<span class="text-gray-700 truncate">' + h + '</span></div>';
+                    }
+                    html += '<div class="border-t border-gray-50 my-1"></div>';
+                }
+                
+                // 快捷目录（可展开的树节点）
+                html += '<div class="text-[10px] text-gray-400 px-3 py-1">本地目录</div>';
+                for (var i = 0; i < data.quick_dirs.length; i++) {
+                    var qd = data.quick_dirs[i];
+                    html += '<div class="tree-dir" data-path="' + qd.path + '">';
+                    html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-xs" onclick="toggleTreeNode(this)">' +
+                        '<span class="tree-arrow text-gray-300 w-3 text-center text-[10px]">▶</span>' +
+                        '<span class="text-yellow-500">📁</span>' +
+                        '<span class="text-gray-700 flex-1 truncate">' + qd.label + '</span>' +
+                        '<span class="text-gray-400 text-[10px] truncate max-w-[100px]">' + qd.path + '</span></div>';
+                    html += '<div class="tree-children hidden pl-5"></div>';
+                    html += '</div>';
+                }
+                
+                // Windows 盘符
+                if (data.windows_drives && data.windows_drives.length > 0) {
+                    html += '<div class="border-t border-gray-50 my-1"></div>';
+                    html += '<div class="text-[10px] text-gray-400 px-3 py-1">Windows 文件系统</div>';
+                    for (var i = 0; i < data.windows_drives.length; i++) {
+                        var wd = data.windows_drives[i];
+                        html += '<div class="tree-dir" data-path="' + wd.path + '">';
+                        html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-xs" onclick="toggleTreeNode(this)">' +
+                            '<span class="tree-arrow text-gray-300 w-3 text-center text-[10px]">▶</span>' +
+                            '<span class="text-blue-500">💿</span>' +
+                            '<span class="text-gray-700 flex-1 truncate">' + wd.label + '</span></div>';
+                        html += '<div class="tree-children hidden pl-5"></div>';
+                        html += '</div>';
+                    }
+                }
+                
+                // WSL 路径
+                if (data.wsl_paths && data.wsl_paths.length > 0) {
+                    html += '<div class="border-t border-gray-50 my-1"></div>';
+                    html += '<div class="text-[10px] text-gray-400 px-3 py-1">WSL 路径</div>';
+                    for (var i = 0; i < data.wsl_paths.length; i++) {
+                        var wp = data.wsl_paths[i];
+                        html += '<div class="tree-dir" data-path="' + wp.path + '">';
+                        html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-xs" onclick="toggleTreeNode(this)">' +
+                            '<span class="tree-arrow text-gray-300 w-3 text-center text-[10px]">▶</span>' +
+                            '<span class="text-green-600">🐧</span>' +
+                            '<span class="text-gray-700 flex-1 truncate">' + wp.label + '</span></div>';
+                        html += '<div class="tree-children hidden pl-5"></div>';
+                        html += '</div>';
+                    }
+                }
+                
+                // 根目录 / 手动输入
+                html += '<div class="border-t border-gray-50 mt-1"></div>';
+                html += '<div class="tree-dir" data-path="/">';
+                html += '<div class="tree-item px-3 py-1.5 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-xs" onclick="toggleTreeNode(this)">' +
+                    '<span class="tree-arrow text-gray-300 w-3 text-center text-[10px]">▶</span>' +
+                    '<span class="text-yellow-500">📁</span>' +
+                    '<span class="text-gray-700">/（根目录）</span></div>';
+                html += '<div class="tree-children hidden pl-5"></div>';
+                html += '</div>';
+                
+                // 手动输入
+                html += '<div class="px-3 py-1.5 flex gap-1 border-t border-gray-50 mt-1">' +
+                    '<input id="tree-manual-input" type="text" class="flex-1 text-[10px] px-1.5 py-1 border border-gray-200 rounded focus:outline-none focus:border-blue-400" placeholder="输入路径回车">' +
+                    '<button class="text-[10px] px-2 py-1 bg-blue-500 text-white rounded hover:bg-blue-600" onclick="selectTreePath(document.getElementById(\'tree-manual-input\').value)">确定</button></div>';
+                
+                content.innerHTML = html;
+                
+                // 回车键触发
+                setTimeout(function() {
+                    var inp = document.getElementById('tree-manual-input');
+                    if (inp) inp.addEventListener('keydown', function(e) {
+                        if (e.key === 'Enter') selectTreePath(this.value);
+                    });
+                }, 100);
+            })
+            .catch(function(e) {
+                content.innerHTML = '<div class="text-center py-3 text-red-400 text-xs">❌ ' + e.message + '</div>';
+            });
+        }
+        
+        function toggleTreeNode(el) {
+            var dirDiv = el.closest('.tree-dir');
+            if (!dirDiv) return;
+            
+            var children = dirDiv.querySelector('.tree-children');
+            var arrow = el.querySelector('.tree-arrow');
+            
+            if (!children.classList.contains('hidden')) {
+                children.classList.add('hidden');
+                if (arrow) arrow.textContent = '▶';
+                return;
+            }
+            
+            // 展开
+            if (arrow) arrow.textContent = '▼';
+            children.classList.remove('hidden');
+            
+            // 如果还没加载子目录
+            if (children.children.length === 0) {
+                children.innerHTML = '<div class="text-center py-2 text-gray-400 text-[10px]"><i class="fas fa-spinner fa-spin"></i></div>';
+                
+                var path = dirDiv.getAttribute('data-path');
+                fetch(state.apiBaseUrl + '/api/export/browse', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: path })
+                })
+                .then(function(r) { return r.json(); })
+                .then(function(data) {
+                    var html = '';
+                    
+                    // 选择此目录
+                    html += '<div class="tree-item px-2 py-1 hover:bg-green-50 cursor-pointer flex items-center gap-1 text-[10px] text-green-600 rounded" onclick="selectTreePath(\'' + data.current_path + '\')">' +
+                        '<span>✅</span><span>选择此目录</span></div>';
+                    
+                    // 子目录
+                    var hasDirs = false;
+                    for (var i = 0; i < data.entries.length; i++) {
+                        var entry = data.entries[i];
+                        if (!entry.is_dir) continue;
+                        hasDirs = true;
+                        html += '<div class="tree-dir" data-path="' + entry.path + '">';
+                        html += '<div class="tree-item px-2 py-1 hover:bg-blue-50 cursor-pointer flex items-center gap-1 text-[10px]" onclick="toggleTreeNode(this)">' +
+                            '<span class="tree-arrow text-gray-300 w-2.5 text-center text-[8px]">▶</span>' +
+                            '<span class="text-yellow-500">📁</span>' +
+                            '<span class="text-gray-700 truncate">' + entry.name + '</span></div>';
+                        html += '<div class="tree-children hidden pl-4"></div>';
+                        html += '</div>';
+                    }
+                    
+                    if (!hasDirs) {
+                        html += '<div class="px-2 py-1 text-gray-400 text-[10px]">（空目录）</div>';
+                    }
+                    
+                    children.innerHTML = html;
+                })
+                .catch(function(e) {
+                    children.innerHTML = '<div class="px-2 py-1 text-red-400 text-[10px]">❌ ' + e.message + '</div>';
+                });
+            }
+        }
+        
     </script>
+
 </body>
 </html>

@@ -30,6 +30,7 @@ class ExportRequest(BaseModel):
     session_id: str = Field(..., description="会话ID")
     title: str = Field(default="问答报告", description="报告标题")
     include_sources: bool = Field(default=True, description="是否包含来源引用")
+    save_path: Optional[str] = Field(default=None, description="保存路径（服务器目录），为空则直接返回文件流")
 
 
 class ExportItem(BaseModel):
@@ -321,6 +322,113 @@ def _escape_rtf(text: str) -> str:
     return ''.join(result)
 
 
+# ========== 目录浏览 ==========
+
+
+class BrowseDirRequest(BaseModel):
+    """浏览目录请求"""
+    path: str = Field(default="", description="要浏览的目录路径，空字符串返回根目录列表")
+
+
+@router.post("/browse", summary="浏览服务器目录")
+async def browse_directory(req: BrowseDirRequest):
+    """
+    浏览服务器文件系统，返回目录列表
+
+    参数:
+        path: 目录路径，空字符串返回根目录/常用目录
+    """
+    try:
+        # 常用快捷目录
+        quick_dirs = [
+            {"path": "/home/zbs/localrag-cs/exports", "label": "📁 项目导出目录"},
+            {"path": "/mnt/c/Users/8/Desktop", "label": "🖥️ Windows 桌面"},
+            {"path": "/mnt/c/Users/8/Documents", "label": "📄 Windows 文档"},
+            {"path": "/home/zbs/localrag-cs/data", "label": "📂 项目数据目录"},
+        ]
+
+        if not req.path:
+            # 根视图：检测 Windows 盘符
+            windows_drives = []
+            mnt_path = "/mnt"
+            if os.path.isdir(mnt_path):
+                try:
+                    for name in sorted(os.listdir(mnt_path)):
+                        drive_path = os.path.join(mnt_path, name)
+                        if os.path.isdir(drive_path) and len(name) == 1 and name.isalpha():
+                            windows_drives.append({
+                                "path": drive_path,
+                                "label": f"💿 Windows {name.upper()}: 盘",
+                            })
+                except PermissionError:
+                    pass
+
+            # WSL 常用路径
+            wsl_paths = [
+                {"path": "/home", "label": "🏠 WSL /home"},
+                {"path": "/etc", "label": "⚙️ WSL /etc"},
+                {"path": "/opt", "label": "📦 WSL /opt"},
+                {"path": "/var", "label": "📋 WSL /var"},
+                {"path": "/tmp", "label": "📝 WSL /tmp"},
+                {"path": "/usr/local", "label": "🔧 WSL /usr/local"},
+            ]
+
+            return {
+                "current_path": "",
+                "parent_path": None,
+                "entries": [],
+                "quick_dirs": quick_dirs,
+                "windows_drives": windows_drives,
+                "wsl_paths": wsl_paths,
+            }
+
+        path = os.path.abspath(req.path)
+        if not os.path.exists(path):
+            raise HTTPException(status_code=404, detail=f"目录不存在: {path}")
+        if not os.path.isdir(path):
+            raise HTTPException(status_code=400, detail=f"不是目录: {path}")
+
+        entries = []
+        try:
+            for name in sorted(os.listdir(path)):
+                full = os.path.join(path, name)
+                try:
+                    is_dir = os.path.isdir(full)
+                    stat = os.stat(full)
+                    entries.append({
+                        "name": name,
+                        "path": full,
+                        "is_dir": is_dir,
+                        "size": stat.st_size if not is_dir else 0,
+                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                    })
+                except PermissionError:
+                    entries.append({
+                        "name": name,
+                        "path": full,
+                        "is_dir": False,
+                        "size": 0,
+                        "modified": "",
+                    })
+        except PermissionError:
+            raise HTTPException(status_code=403, detail=f"无权限访问: {path}")
+
+        parent_path = os.path.dirname(path) if path != "/" else None
+
+        return {
+            "current_path": path,
+            "parent_path": parent_path,
+            "entries": entries,
+            "quick_dirs": quick_dirs,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"浏览目录失败: {e}")
+        raise HTTPException(status_code=500, detail=f"浏览目录失败: {str(e)}")
+
+
 # ========== API 路由 ==========
 
 
@@ -357,6 +465,17 @@ async def export_pdf(req: ExportRequest):
             filename = f"{req.title}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.rtf"
 
         safe_filename = _safe_filename(req.title, "pdf")
+
+        # 如果指定了保存路径，写入文件
+        if req.save_path:
+            save_dir = os.path.abspath(req.save_path)
+            os.makedirs(save_dir, exist_ok=True)
+            filepath = os.path.join(save_dir, safe_filename)
+            with open(filepath, "wb") as f:
+                f.write(pdf_bytes)
+            logger.info(f"PDF 已保存到: {filepath}")
+            return {"message": "导出成功", "filepath": filepath, "filename": safe_filename}
+
         return StreamingResponse(
             io.BytesIO(pdf_bytes),
             media_type=content_type,
@@ -404,6 +523,17 @@ async def export_docx(req: ExportRequest):
             content_type = "application/rtf"
 
         safe_filename = _safe_filename(req.title, "docx")
+
+        # 如果指定了保存路径，写入文件
+        if req.save_path:
+            save_dir = os.path.abspath(req.save_path)
+            os.makedirs(save_dir, exist_ok=True)
+            filepath = os.path.join(save_dir, safe_filename)
+            with open(filepath, "wb") as f:
+                f.write(docx_bytes)
+            logger.info(f"Word 已保存到: {filepath}")
+            return {"message": "导出成功", "filepath": filepath, "filename": safe_filename}
+
         return StreamingResponse(
             io.BytesIO(docx_bytes),
             media_type=content_type,
