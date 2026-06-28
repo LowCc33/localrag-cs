@@ -107,11 +107,30 @@ async def search_chunks(
         must_conditions = []
 
         if keyword:
-            # 关键词搜索 answer（内容）和 question（标题）字段
+            # 先用 match_phrase 精确匹配，再用 multi_match 模糊匹配
+            # 避免 standard analyzer 把中文拆成单字导致大量误匹配
             must_conditions.append({
-                "multi_match": {
-                    "query": keyword,
-                    "fields": ["answer", "question", "content", "title"]
+                "bool": {
+                    "should": [
+                        {
+                            "match_phrase": {
+                                "answer": {"query": keyword, "boost": 3}
+                            }
+                        },
+                        {
+                            "match_phrase": {
+                                "question": {"query": keyword, "boost": 2}
+                            }
+                        },
+                        {
+                            "multi_match": {
+                                "query": keyword,
+                                "fields": ["answer", "question", "content", "title"],
+                                "boost": 1
+                            }
+                        }
+                    ],
+                    "minimum_should_match": 1
                 }
             })
 
@@ -124,14 +143,17 @@ async def search_chunks(
         body = {
             "from": from_val,
             "size": size,
-            "sort": [{"create_time": {"order": "desc"}}],
             "_source": ["doc_id", "question", "answer", "title", "content", "chunk_index", "source_file", "create_time"]
         }
 
         if must_conditions:
             body["query"] = {"bool": {"must": must_conditions}}
+            # 有关键词时按相关性排序
+            body["sort"] = [{"_score": {"order": "desc"}}]
         else:
             body["query"] = {"match_all": {}}
+            # 无关键词时按时间排序
+            body["sort"] = [{"create_time": {"order": "desc"}}]
 
         # 执行搜索
         resp = es.client.search(index=index_name, body=body)
