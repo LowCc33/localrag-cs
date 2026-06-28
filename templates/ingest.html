@@ -3,1279 +3,1228 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LocalRAG-CS 数据导入系统</title>
+    <title>LocalRAG-CS 数据导入</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Font Awesome 图标 -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- 自定义样式 -->
     <style>
+        /* ============ 全局 ============ */
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            min-height: 100vh;
+        }
+
         /* 自定义滚动条 */
-        ::-webkit-scrollbar {
-            width: 8px;
-            height: 8px;
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4a4a6c; }
+
+        /* ============ 顶栏（与问答页一致） ============ */
+        .topbar {
+            background: #1e1e2e;
+            border-bottom: 1px solid #2a2a4a;
+            padding: 0 20px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
         }
-        ::-webkit-scrollbar-track {
-            background: #f1f1f1;
-            border-radius: 4px;
+        .topbar-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
         }
-        ::-webkit-scrollbar-thumb {
-            background: #c1c1c1;
-            border-radius: 4px;
+        .topbar-logo .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #6c63ff, #7c6fff);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 16px;
+            color: #fff;
         }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #a8a8a8;
+        .topbar-logo .logo-text {
+            font-size: 16px;
+            font-weight: 700;
+            color: #e0e0e0;
+            letter-spacing: 0.5px;
         }
-        
-        /* 加载动画 */
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+        .topbar-logo .logo-sub {
+            font-size: 11px;
+            color: #7a7a9a;
+            margin-left: 4px;
         }
-        .animate-pulse-fast {
-            animation: pulse 1s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+
+        .topbar-btn {
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            border: 1px solid #3a3a5c;
+            background: transparent;
+            color: #9e9e9e;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            text-decoration: none;
         }
-        
-        /* 文件拖放区域样式 */
+        .topbar-btn:hover {
+            border-color: #6c63ff;
+            color: #c0c0e0;
+        }
+
+        /* ============ 统计卡片 ============ */
+        .stat-card {
+            background: #1e1e32;
+            border: 1px solid #3a3a5a;
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .stat-card .stat-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 22px;
+        }
+        .stat-card .stat-icon-blue { background: rgba(108,99,255,0.15); color: #6c63ff; }
+        .stat-card .stat-icon-green { background: rgba(82,196,26,0.15); color: #52c41a; }
+        .stat-card .stat-icon-purple { background: rgba(108,99,255,0.15); color: #6c63ff; }
+        .stat-card .stat-label { font-size: 12px; color: #9e9e9e; }
+        .stat-card .stat-value { font-size: 26px; font-weight: 700; color: #e0e0e0; line-height: 1.2; }
+
+        /* ============ 面板通用 ============ */
+        .panel {
+            background: #1e1e32;
+            border: 1px solid #3a3a5a;
+            border-radius: 12px;
+            padding: 20px;
+        }
+        .panel-title {
+            font-size: 15px;
+            font-weight: 600;
+            color: #c0c0e0;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .panel-title i { color: #6c63ff; }
+
+        /* ============ 拖放区域 ============ */
         .drop-zone {
-            border: 3px dashed #d1d5db;
+            border: 3px dashed #4a4a6a;
+            border-radius: 12px;
+            padding: 32px;
+            text-align: center;
+            cursor: pointer;
             transition: all 0.3s ease;
+            background: #1e1e32;
         }
+        .drop-zone:hover { border-color: #5a5a7a; }
         .drop-zone.drag-over {
-            border-color: #3b82f6;
-            background-color: #eff6ff;
+            border-color: #6c63ff;
+            background: rgba(108,99,255,0.05);
         }
-        .drop-zone.drag-over .drop-text {
-            color: #3b82f6;
+        .drop-zone .drop-icon { font-size: 48px; color: #4a4a6a; margin-bottom: 12px; }
+        .drop-zone .drop-title { font-size: 16px; font-weight: 500; color: #9e9e9e; margin-bottom: 4px; }
+        .drop-zone .drop-sub { font-size: 13px; color: #5a5a7a; margin-bottom: 8px; }
+        .drop-zone .drop-hint { font-size: 11px; color: #4a4a6a; }
+
+        /* ============ 按钮 ============ */
+        .btn-primary {
+            padding: 8px 20px;
+            background: #6c63ff;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
         }
-        
-        /* 进度条动画 */
-        .progress-bar {
+        .btn-primary:hover { background: #7c6fff; }
+        .btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .btn-secondary {
+            padding: 8px 20px;
+            background: transparent;
+            color: #9e9e9e;
+            border: 1px solid #3a3a5c;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-secondary:hover { border-color: #6c63ff; color: #c0c0e0; }
+
+        .btn-success {
+            padding: 8px 20px;
+            background: #2d6a4f;
+            color: #fff;
+            border: none;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: background 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .btn-success:hover { background: #3a8a5f; }
+        .btn-success:disabled { opacity: 0.4; cursor: not-allowed; }
+
+        .btn-sm {
+            padding: 4px 12px;
+            font-size: 11px;
+            border-radius: 6px;
+        }
+
+        /* ============ 文件列表项 ============ */
+        .file-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            background: #2a2a4a;
+            border-radius: 8px;
+            border: 1px solid #3a3a5c;
+            transition: background 0.15s;
+        }
+        .file-item:hover { background: #32325a; }
+        .file-item .file-icon { color: #5a5a7a; font-size: 20px; margin-right: 10px; }
+        .file-item .file-name { font-size: 13px; color: #c0c0e0; font-weight: 500; }
+        .file-item .file-size { font-size: 11px; color: #5a5a7a; }
+        .file-item .file-del {
+            width: 28px; height: 28px;
+            border-radius: 6px;
+            background: transparent;
+            border: none;
+            color: #5a5a7a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+        .file-item .file-del:hover { color: #e74c3c; background: rgba(231,76,60,0.1); }
+
+        /* ============ 任务队列 ============ */
+        .task-item {
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 10px;
+            padding: 14px;
+        }
+        .task-item .task-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        .task-item .task-id { font-size: 13px; font-weight: 600; color: #c0c0e0; }
+        .task-item .task-status { font-size: 11px; padding: 2px 8px; border-radius: 9999px; font-weight: 600; }
+        .status-pending { color: #5a5a7a; background: rgba(90,90,122,0.15); }
+        .status-processing { color: #d4a017; background: rgba(212,160,23,0.15); }
+        .status-completed { color: #52c41a; background: rgba(82,196,26,0.15); }
+        .status-failed { color: #e74c3c; background: rgba(231,76,60,0.15); }
+
+        .task-item .progress-track {
+            width: 100%;
+            height: 6px;
+            background: #1e1e2e;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .task-item .progress-bar {
+            height: 100%;
+            background: #6c63ff;
+            border-radius: 3px;
             transition: width 0.3s ease;
         }
-        
-        /* 状态颜色 */
-        .status-pending { color: #6b7280; }
-        .status-processing { color: #f59e0b; }
-        .status-completed { color: #10b981; }
-        .status-failed { color: #ef4444; }
-        
-        /* 响应式调整 */
+        .task-item .task-stats { font-size: 11px; color: #5a5a7a; margin-top: 6px; }
+        .task-item .task-stats span { display: inline-flex; align-items: center; gap: 3px; margin-right: 12px; }
+
+        .task-item .task-actions {
+            display: flex;
+            gap: 4px;
+        }
+        .task-item .task-actions button {
+            width: 26px; height: 26px;
+            border-radius: 6px;
+            background: transparent;
+            border: none;
+            color: #5a5a7a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 11px;
+            transition: all 0.15s;
+        }
+        .task-item .task-actions button:hover { background: rgba(108,99,255,0.1); color: #c0c0e0; }
+
+        /* ============ 右侧信息面板 ============ */
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 6px 0;
+            font-size: 12px;
+        }
+        .info-row .info-label { color: #7a7a9a; }
+        .info-row .info-value { color: #c0c0e0; font-weight: 500; }
+
+        /* 文件类型分布条 */
+        .type-bar-track {
+            width: 80px;
+            height: 6px;
+            background: #2a2a4a;
+            border-radius: 3px;
+            overflow: hidden;
+        }
+        .type-bar-fill {
+            height: 100%;
+            background: #6c63ff;
+            border-radius: 3px;
+        }
+
+        /* 最近文档项 */
+        .recent-doc-item {
+            display: flex;
+            align-items: center;
+            padding: 10px 12px;
+            background: #2a2a4a;
+            border-radius: 8px;
+            border: 1px solid #3a3a5c;
+            transition: background 0.15s;
+            cursor: default;
+        }
+        .recent-doc-item:hover { background: #32325a; }
+        .recent-doc-item .doc-icon { color: #5a5a7a; font-size: 18px; margin-right: 10px; flex-shrink: 0; }
+        .recent-doc-item .doc-title { font-size: 12px; color: #c0c0e0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .recent-doc-item .doc-meta { font-size: 10px; color: #5a5a7a; margin-top: 2px; }
+
+        /* ============ 弹窗 ============ */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.6);
+            z-index: 50;
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            padding-top: 60px;
+        }
+        .modal-content {
+            background: #1e1e32;
+            border: 1px solid #3a3a5a;
+            border-radius: 16px;
+            width: 90%;
+            max-width: 900px;
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        }
+        .modal-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 16px 20px;
+            border-bottom: 1px solid #2a2a4a;
+        }
+        .modal-header h3 {
+            font-size: 16px;
+            font-weight: 600;
+            color: #c0c0e0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .modal-header h3 i { color: #6c63ff; }
+        .modal-close {
+            width: 32px; height: 32px;
+            border-radius: 8px;
+            background: transparent;
+            border: none;
+            color: #5a5a7a;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+            transition: all 0.15s;
+        }
+        .modal-close:hover { color: #c0c0e0; background: rgba(255,255,255,0.05); }
+        .modal-body { flex: 1; overflow-y: auto; padding: 16px 20px; }
+        .modal-footer {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            border-top: 1px solid #2a2a4a;
+        }
+
+        /* 弹窗搜索框 */
+        .search-box {
+            position: relative;
+            margin-bottom: 12px;
+        }
+        .search-box i {
+            position: absolute;
+            left: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            color: #5a5a7a;
+            font-size: 12px;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 8px 12px 8px 32px;
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 8px;
+            color: #e0e0e0;
+            font-size: 12px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .search-box input:focus { border-color: #6c63ff; }
+        .search-box input::placeholder { color: #5a5a7a; }
+
+        /* 弹窗文档列表项 */
+        .modal-doc-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 12px;
+            background: #2a2a4a;
+            border-radius: 8px;
+            border: 1px solid #3a3a5c;
+            margin-bottom: 6px;
+            transition: background 0.15s;
+        }
+        .modal-doc-item:hover { background: #32325a; }
+        .modal-doc-item .doc-info { display: flex; align-items: center; flex: 1; min-width: 0; }
+        .modal-doc-item .doc-icon { color: #5a5a7a; font-size: 18px; margin-right: 10px; flex-shrink: 0; }
+        .modal-doc-item .doc-name { font-size: 12px; color: #c0c0e0; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .modal-doc-item .doc-detail { font-size: 10px; color: #5a5a7a; }
+        .modal-doc-item .doc-type-tag {
+            font-size: 10px;
+            padding: 1px 6px;
+            border-radius: 4px;
+            background: #1e1e2e;
+            color: #7a7a9a;
+            font-weight: 600;
+        }
+        .modal-doc-item .doc-del {
+            padding: 6px;
+            border-radius: 6px;
+            background: transparent;
+            border: none;
+            color: #5a5a7a;
+            cursor: pointer;
+            opacity: 0;
+            transition: all 0.15s;
+            font-size: 12px;
+        }
+        .modal-doc-item:hover .doc-del { opacity: 1; }
+        .modal-doc-item .doc-del:hover { color: #e74c3c; background: rgba(231,76,60,0.1); }
+
+        /* 分页按钮 */
+        .page-btn {
+            padding: 6px 14px;
+            border-radius: 6px;
+            font-size: 12px;
+            background: transparent;
+            border: 1px solid #3a3a5c;
+            color: #9e9e9e;
+            cursor: pointer;
+            transition: all 0.15s;
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .page-btn:hover:not(:disabled) { border-color: #6c63ff; color: #c0c0e0; }
+        .page-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .page-info { font-size: 11px; color: #5a5a7a; }
+
+        /* ============ 通知 ============ */
+        .notification {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 100;
+            padding: 12px 20px;
+            border-radius: 10px;
+            font-size: 13px;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.3);
+            transform: translateX(120%);
+            transition: transform 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            border-left: 4px solid;
+        }
+        .notification.show { transform: translateX(0); }
+        .notification-success { background: #1a3a2a; border-color: #52c41a; color: #b7eb8f; }
+        .notification-error { background: #3a1a1a; border-color: #e74c3c; color: #f5a5a5; }
+        .notification-warning { background: #3a2a1a; border-color: #d4a017; color: #f5d78e; }
+        .notification-info { background: #1a2a3a; border-color: #6c63ff; color: #b0b0ff; }
+
+        /* ============ 错误提示 ============ */
+        .error-box {
+            background: rgba(231,76,60,0.1);
+            border-left: 3px solid #e74c3c;
+            border-radius: 6px;
+            padding: 8px 12px;
+            font-size: 11px;
+            color: #f5a5a5;
+            margin-top: 6px;
+        }
+
+        /* ============ 响应式 ============ */
         @media (max-width: 640px) {
-            .container {
-                padding-left: 1rem;
-                padding-right: 1rem;
-            }
-            .grid-cols-2 {
-                grid-template-columns: 1fr;
-            }
+            .stat-card .stat-value { font-size: 20px; }
         }
     </style>
 </head>
-<body class="bg-gray-50 min-h-screen">
-    <!-- 导航栏 -->
-    <nav class="bg-white shadow-sm border-b border-gray-200">
-        <div class="container mx-auto px-4 py-3">
-            <div class="flex items-center justify-between">
-                <div class="flex items-center space-x-3">
-                    <i class="fas fa-database text-blue-600 text-2xl"></i>
-                    <div>
-                        <h1 class="text-xl font-bold text-gray-900">LocalRAG-CS 数据导入系统</h1>
-                        <p class="text-sm text-gray-500">上传文档，构建知识库</p>
-                    </div>
-                </div>
-                <div class="flex items-center space-x-4">
-                    <a href="/" class="text-gray-600 hover:text-gray-900">
-                        <i class="fas fa-home mr-1"></i> 返回主页
-                    </a>
-                    <div class="text-sm text-gray-500" id="current-time">
-                        <!-- JS动态更新 -->
-                    </div>
-                </div>
+<body>
+
+    <!-- ============ 顶栏（与问答页一致） ============ -->
+    <header class="topbar">
+        <div class="topbar-logo">
+            <div class="logo-icon">R</div>
+            <span class="logo-text">LocalRAG-CS</span>
+            <span class="logo-sub">数据导入</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <a href="/" class="topbar-btn">
+                <i class="fas fa-comment-dots"></i>返回问答
+            </a>
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(45,106,79,0.2);border-radius:9999px;font-size:11px;color:#52c41a;">
+                <div style="width:6px;height:6px;background:#52c41a;border-radius:50%;"></div>
+                <span id="backend-status-text">运行中</span>
             </div>
         </div>
-    </nav>
+    </header>
 
-    <div class="container mx-auto px-4 py-8">
+    <!-- ============ 主内容 ============ -->
+    <div style="max-width:1200px;margin:0 auto;padding:24px 20px;">
+
         <!-- 统计面板 -->
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
-            <div class="bg-white rounded-lg shadow p-6">
-                <div class="flex items-center">
-                    <div class="bg-blue-100 p-3 rounded-full">
-                        <i class="fas fa-file-alt text-blue-600 text-2xl"></i>
-                    </div>
-                    <div class="ml-4">
-                        <p class="text-sm text-gray-500">总文档数</p>
-                        <p class="text-2xl font-bold text-gray-900" id="total-docs">0</p>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:16px;margin-bottom:24px;">
+            <div class="stat-card">
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <div class="stat-icon stat-icon-blue"><i class="fas fa-file-alt"></i></div>
+                    <div>
+                        <div class="stat-label">总文档数</div>
+                        <div class="stat-value" id="total-docs">0</div>
                     </div>
                 </div>
             </div>
-            
-            <div class="bg-white rounded-lg shadow p-6">
-                <div class="flex items-center">
-                    <div class="bg-green-100 p-3 rounded-full">
-                        <i class="fas fa-cubes text-green-600 text-2xl"></i>
-                    </div>
-                    <div class="ml-4">
-                        <p class="text-sm text-gray-500">总Chunks数</p>
-                        <p class="text-2xl font-bold text-gray-900" id="total-chunks">0</p>
+            <div class="stat-card">
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <div class="stat-icon stat-icon-green"><i class="fas fa-cubes"></i></div>
+                    <div>
+                        <div class="stat-label">总 Chunks</div>
+                        <div class="stat-value" id="total-chunks">0</div>
                     </div>
                 </div>
             </div>
-            
-            <div class="bg-white rounded-lg shadow p-6">
-                <div class="flex items-center">
-                    <div class="bg-purple-100 p-3 rounded-full">
-                        <i class="fas fa-hdd text-purple-600 text-2xl"></i>
-                    </div>
-                    <div class="ml-4">
-                        <p class="text-sm text-gray-500">占用空间</p>
-                        <p class="text-2xl font-bold text-gray-900" id="total-size">0 MB</p>
+            <div class="stat-card">
+                <div style="display:flex;align-items:center;gap:16px;">
+                    <div class="stat-icon stat-icon-purple"><i class="fas fa-hdd"></i></div>
+                    <div>
+                        <div class="stat-label">占用空间</div>
+                        <div class="stat-value" id="total-size">0 MB</div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-            <!-- 左侧：文件上传区域 -->
-            <div class="lg:col-span-2">
-                <div class="bg-white rounded-lg shadow p-6 mb-6">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                        <i class="fas fa-cloud-upload-alt mr-2"></i>上传文件
-                    </h2>
-                    
-                    <!-- 文件拖放区域 -->
-                    <div id="drop-zone" class="drop-zone rounded-lg p-8 text-center cursor-pointer mb-4">
-                        <i class="fas fa-cloud-upload-alt text-5xl text-gray-400 mb-4"></i>
-                        <p class="drop-text text-xl font-medium text-gray-700 mb-2">拖放文件到此处</p>
-                        <p class="text-gray-500 mb-4">或点击选择文件</p>
-                        <p class="text-sm text-gray-400">支持 .txt, .md, .pdf, .docx, .csv 格式</p>
-                        <input type="file" id="file-input" class="hidden" multiple accept=".txt,.md,.pdf,.docx,.csv">
-                        <button id="browse-btn" class="mt-4 px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition">
-                            <i class="fas fa-folder-open mr-2"></i>选择文件
-                        </button>
-                    </div>
-                    
-                    <!-- 文件列表预览 -->
-                    <div id="file-list" class="hidden">
-                        <h3 class="text-md font-medium text-gray-900 mb-3">已选择文件</h3>
-                        <div id="selected-files" class="space-y-2 max-h-60 overflow-y-auto">
-                            <!-- 文件项将通过JS动态添加 -->
+        <!-- 主区域：左2/3 + 右1/3 -->
+        <div style="display:grid;grid-template-columns:1fr;gap:24px;">
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:24px;">
+
+                <!-- 左侧：上传 + 队列 -->
+                <div>
+                    <!-- 上传区域 -->
+                    <div class="panel" style="margin-bottom:20px;">
+                        <div class="panel-title"><i class="fas fa-cloud-upload-alt"></i>上传文件</div>
+                        <div id="drop-zone" class="drop-zone">
+                            <div class="drop-icon"><i class="fas fa-cloud-upload-alt"></i></div>
+                            <div class="drop-title">拖放文件到此处</div>
+                            <div class="drop-sub">或点击选择文件</div>
+                            <div class="drop-hint">支持 .txt, .md, .pdf, .docx, .csv 格式</div>
+                            <input type="file" id="file-input" class="hidden" multiple accept=".txt,.md,.pdf,.docx,.csv">
+                            <div style="margin-top:16px;">
+                                <button id="browse-btn" class="btn-primary">
+                                    <i class="fas fa-folder-open"></i>选择文件
+                                </button>
+                            </div>
                         </div>
-                        <div class="mt-4 flex justify-end">
-                            <button id="clear-files" class="px-4 py-2 border border-gray-300 text-gray-700 rounded-lg hover:bg-gray-50 mr-2">
-                                <i class="fas fa-times mr-2"></i>清空列表
-                            </button>
-                            <button id="upload-btn" class="px-6 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition">
-                                <i class="fas fa-upload mr-2"></i>开始导入
-                            </button>
+
+                        <!-- 文件列表预览 -->
+                        <div id="file-list" class="hidden" style="margin-top:16px;">
+                            <div style="font-size:13px;font-weight:600;color:#c0c0e0;margin-bottom:10px;">已选择文件</div>
+                            <div id="selected-files" style="max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
+                            <div style="margin-top:12px;display:flex;justify-content:flex-end;gap:8px;">
+                                <button id="clear-files" class="btn-secondary btn-sm">清空列表</button>
+                                <button id="upload-btn" class="btn-success btn-sm"><i class="fas fa-upload"></i>开始导入</button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 导入队列 -->
+                    <div class="panel">
+                        <div class="panel-title"><i class="fas fa-tasks"></i>导入队列</div>
+                        <div id="task-list">
+                            <div id="empty-queue" style="text-align:center;padding:32px 0;color:#5a5a7a;">
+                                <i class="fas fa-inbox" style="font-size:32px;margin-bottom:12px;display:block;"></i>
+                                <p style="font-size:13px;">暂无导入任务</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 右侧：信息面板 -->
+                <div style="display:flex;flex-direction:column;gap:16px;">
+                    <!-- 系统信息 -->
+                    <div class="panel">
+                        <div class="panel-title"><i class="fas fa-info-circle"></i>系统信息</div>
+                        <div>
+                            <div class="info-row"><span class="info-label">后端状态</span><span class="info-value" id="backend-status"><span style="color:#52c41a;">在线</span></span></div>
+                            <div class="info-row"><span class="info-label">支持格式</span><span class="info-value">txt, md, pdf, docx, csv</span></div>
+                            <div class="info-row"><span class="info-label">最大文件</span><span class="info-value">100 MB</span></div>
+                            <div class="info-row"><span class="info-label">并发任务</span><span class="info-value">3</span></div>
+                        </div>
+                    </div>
+
+                    <!-- 知识库概览 -->
+                    <div class="panel">
+                        <div class="panel-title"><i class="fas fa-chart-pie"></i>知识库概览</div>
+                        <div id="kb-overview">
+                            <div id="file-type-dist" style="margin-bottom:12px;">
+                                <div style="text-align:center;color:#5a5a7a;font-size:12px;padding:8px 0;">加载中...</div>
+                            </div>
+                            <div id="kb-activity" style="border-top:1px solid #2a2a4a;padding-top:10px;">
+                                <div style="text-align:center;color:#5a5a7a;font-size:12px;padding:8px 0;">加载中...</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 最近导入 -->
+                    <div class="panel">
+                        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+                            <div class="panel-title" style="margin-bottom:0;"><i class="fas fa-history"></i>最近导入</div>
+                            <div style="display:flex;gap:6px;">
+                                <button id="view-all-docs" class="btn-secondary btn-sm"><i class="fas fa-list"></i>查看全部</button>
+                                <button id="refresh-docs" class="btn-secondary btn-sm" style="padding:4px 8px;"><i class="fas fa-redo"></i></button>
+                            </div>
+                        </div>
+                        <div id="recent-docs" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
+                            <div style="text-align:center;padding:20px 0;color:#5a5a7a;">
+                                <i class="fas fa-file-alt" style="font-size:24px;margin-bottom:8px;display:block;"></i>
+                                <p style="font-size:12px;">暂无文档</p>
+                            </div>
                         </div>
                     </div>
                 </div>
-                
-                <!-- 导入队列 -->
-                <div class="bg-white rounded-lg shadow p-6">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                        <i class="fas fa-tasks mr-2"></i>导入队列
-                    </h2>
-                    <div id="task-list" class="space-y-3">
-                        <div class="text-center text-gray-500 py-8" id="empty-queue">
-                            <i class="fas fa-inbox text-4xl mb-4"></i>
-                            <p>暂无导入任务</p>
-                        </div>
-                        <!-- 任务项将通过JS动态添加 -->
-                    </div>
-                </div>
+
             </div>
-            
-            <!-- 右侧：系统信息和文档列表 -->
-            <div class="space-y-6">
-                <!-- 系统信息 -->
-                <div class="bg-white rounded-lg shadow p-6">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                        <i class="fas fa-info-circle mr-2"></i>系统信息
-                    </h2>
-                    <div class="space-y-3">
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">后端状态</span>
-                            <span class="font-medium" id="backend-status">
-                                <span class="text-green-600">在线</span>
-                            </span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">支持格式</span>
-                            <span class="font-medium">txt, md, pdf, docx, csv</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">最大文件</span>
-                            <span class="font-medium">100 MB</span>
-                        </div>
-                        <div class="flex justify-between">
-                            <span class="text-gray-600">并发任务</span>
-                            <span class="font-medium">3</span>
+        </div>
+    </div>
+
+    <!-- ============ 文档管理弹窗 ============ -->
+    <div id="doc-modal" class="hidden">
+        <div class="modal-overlay" id="modal-overlay">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h3><i class="fas fa-database"></i>知识库文档管理</h3>
+                    <button class="modal-close" id="modal-close"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="modal-body">
+                    <div class="search-box">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="doc-search" placeholder="搜索文档...">
+                    </div>
+                    <div id="modal-doc-list">
+                        <div style="text-align:center;padding:32px 0;color:#5a5a7a;">
+                            <i class="fas fa-spinner fa-spin" style="font-size:24px;margin-bottom:8px;display:block;"></i>
+                            <p style="font-size:12px;">加载中...</p>
                         </div>
                     </div>
                 </div>
-                
-                <!-- 知识库概览 -->
-                <div class="bg-white rounded-lg shadow p-6">
-                    <h2 class="text-lg font-semibold text-gray-900 mb-4">
-                        <i class="fas fa-chart-pie mr-2"></i>知识库概览
-                    </h2>
-                    <div id="kb-overview">
-                        <!-- 文件类型分布 -->
-                        <div id="file-type-dist" class="space-y-2 mb-4">
-                            <div class="text-center text-gray-500 py-2 text-sm">加载中...</div>
-                        </div>
-                        <!-- 活跃度 -->
-                        <div id="kb-activity" class="border-t border-gray-100 pt-3 mt-3 space-y-2 text-sm">
-                            <div class="text-center text-gray-500 py-2">加载中...</div>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- 最近导入的文档 -->
-                <div class="bg-white rounded-lg shadow p-6">
-                    <div class="flex justify-between items-center mb-4">
-                        <h2 class="text-lg font-semibold text-gray-900">
-                            <i class="fas fa-history mr-2"></i>最近导入
-                        </h2>
-                        <div class="flex items-center gap-2">
-                            <button id="view-all-docs" class="px-3 py-1.5 text-sm bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition">
-                                <i class="fas fa-list mr-1"></i>查看全部
-                            </button>
-                            <button id="refresh-docs" class="text-blue-600 hover:text-blue-800">
-                                <i class="fas fa-redo"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div id="recent-docs" class="space-y-3 max-h-80 overflow-y-auto">
-                        <div class="text-center text-gray-500 py-4">
-                            <i class="fas fa-file-alt text-2xl mb-2"></i>
-                            <p>暂无文档</p>
-                        </div>
-                        <!-- 文档项将通过JS动态添加 -->
+                <div class="modal-footer">
+                    <div class="page-info" id="modal-page-info">第 0/0 页</div>
+                    <div style="display:flex;gap:8px;">
+                        <button class="page-btn" id="modal-prev-page" disabled><i class="fas fa-chevron-left"></i>上一页</button>
+                        <button class="page-btn" id="modal-next-page" disabled>下一页<i class="fas fa-chevron-right"></i></button>
                     </div>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- 文档管理弹窗 -->
-    <div id="doc-modal" class="fixed inset-0 z-50 hidden overflow-y-auto" aria-modal="true">
-        <div class="flex items-start justify-center min-h-screen pt-4 px-4 pb-20 text-center sm:block sm:p-0">
-            <!-- 遮罩层 -->
-            <div class="fixed inset-0 bg-gray-500 bg-opacity-75 transition-opacity" id="modal-overlay"></div>
-            
-            <!-- 弹窗主体 -->
-            <div class="inline-block align-bottom bg-white rounded-xl text-left overflow-hidden shadow-xl transform transition-all sm:my-8 sm:align-middle sm:max-w-4xl sm:w-full">
-                <div class="bg-white px-6 py-4 border-b border-gray-200 flex items-center justify-between">
-                    <h3 class="text-lg font-semibold text-gray-900">
-                        <i class="fas fa-database mr-2 text-blue-600"></i>知识库文档管理
-                    </h3>
-                    <button id="modal-close" class="text-gray-400 hover:text-gray-600 transition">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
-                
-                <div class="px-6 py-4">
-                    <!-- 搜索栏（预留） -->
-                    <div class="mb-4">
-                        <div class="relative">
-                            <i class="fas fa-search absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"></i>
-                            <input type="text" id="doc-search" placeholder="搜索文档..." class="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 text-sm">
-                        </div>
-                    </div>
-                    
-                    <!-- 文档列表 -->
-                    <div id="modal-doc-list" class="space-y-2 max-h-96 overflow-y-auto">
-                        <div class="text-center text-gray-500 py-8">
-                            <i class="fas fa-file-alt text-3xl mb-2"></i>
-                            <p>加载中...</p>
-                        </div>
-                    </div>
-                    
-                    <!-- 分页 -->
-                    <div class="flex items-center justify-between mt-4 pt-4 border-t border-gray-100">
-                        <div class="text-sm text-gray-500" id="modal-page-info">第 0/0 页</div>
-                        <div class="flex items-center gap-2">
-                            <button id="modal-prev-page" class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                                <i class="fas fa-chevron-left mr-1"></i>上一页
-                            </button>
-                            <button id="modal-next-page" class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed" disabled>
-                                下一页<i class="fas fa-chevron-right ml-1"></i>
-                            </button>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
+    <!-- ============ 通知容器 ============ -->
+    <div id="notification-container"></div>
 
-    <!-- 底部信息 -->
-    <footer class="mt-12 border-t border-gray-200 bg-white py-6">
-        <div class="container mx-auto px-4">
-            <div class="flex flex-col md:flex-row justify-between items-center">
-                <div class="text-gray-600 mb-4 md:mb-0">
-                    <p>© 2026 LocalRAG-CS 数据导入系统</p>
-                    <p class="text-sm mt-1">基于 FastAPI + SQLite + 本地向量化</p>
-                </div>
-                <div class="flex space-x-4">
-                    <a href="#" class="text-gray-500 hover:text-gray-700">
-                        <i class="fab fa-github text-xl"></i>
-                    </a>
-                    <a href="#" class="text-gray-500 hover:text-gray-700">
-                        <i class="fas fa-question-circle text-xl"></i>
-                    </a>
-                </div>
-            </div>
-        </div>
-    </footer>
-
-    <!-- JavaScript -->
     <script>
-        // 全局变量
-        let selectedFiles = [];
-        let activeTasks = new Map(); // task_id -> task_data
-        let refreshInterval = null;
-        
-        // DOM元素
-        const dropZone = document.getElementById('drop-zone');
-        const fileInput = document.getElementById('file-input');
-        const browseBtn = document.getElementById('browse-btn');
-        const fileList = document.getElementById('file-list');
-        const selectedFilesContainer = document.getElementById('selected-files');
-        const clearFilesBtn = document.getElementById('clear-files');
-        const uploadBtn = document.getElementById('upload-btn');
-        const taskList = document.getElementById('task-list');
-        const emptyQueue = document.getElementById('empty-queue');
-        const recentDocs = document.getElementById('recent-docs');
-        const refreshDocsBtn = document.getElementById('refresh-docs');
-        const backendStatus = document.getElementById('backend-status');
-        
-        // 统计元素
-        const totalDocsEl = document.getElementById('total-docs');
-        const totalChunksEl = document.getElementById('total-chunks');
-        const totalSizeEl = document.getElementById('total-size');
-        const currentTimeEl = document.getElementById('current-time');
-        
-        // API基础URL
-        const API_BASE = '/api/ingest';
-        
-        // ========== 初始化函数 ==========
-        
+        // ============ 全局变量 ============
+        var selectedFiles = [];
+        var activeTasks = new Map();
+        var refreshInterval = null;
+        var API_BASE = '/api/ingest';
+
+        // ============ DOM 引用 ============
+        var dropZone = document.getElementById('drop-zone');
+        var fileInput = document.getElementById('file-input');
+        var browseBtn = document.getElementById('browse-btn');
+        var fileList = document.getElementById('file-list');
+        var selectedFilesContainer = document.getElementById('selected-files');
+        var clearFilesBtn = document.getElementById('clear-files');
+        var uploadBtn = document.getElementById('upload-btn');
+        var taskList = document.getElementById('task-list');
+        var emptyQueue = document.getElementById('empty-queue');
+        var recentDocs = document.getElementById('recent-docs');
+        var refreshDocsBtn = document.getElementById('refresh-docs');
+
+        // ========== 初始化 ==========
+
         function init() {
-            updateCurrentTime();
-            setInterval(updateCurrentTime, 60000); // 每分钟更新一次时间
-            
-            // 检查后端状态
             checkBackendStatus();
-            
-            // 加载统计数据
             loadStats();
-            
-            // 加载最近文档
             loadRecentDocuments();
-            
-            // 设置事件监听器
             setupEventListeners();
-            
-            // 开始定时刷新任务状态
             startTaskRefresh();
         }
-        
-        function updateCurrentTime() {
-            const now = new Date();
-            const dateStr = now.toLocaleDateString('zh-CN', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit'
-            });
-            const timeStr = now.toLocaleTimeString('zh-CN', {
-                hour: '2-digit',
-                minute: '2-digit'
-            });
-            currentTimeEl.textContent = `${dateStr} ${timeStr}`;
-        }
-        
+
         async function checkBackendStatus() {
             try {
-                const response = await fetch(`${API_BASE}/documents?limit=1`);
-                if (response.ok) {
-                    backendStatus.innerHTML = '<span class="text-green-600">在线</span>';
+                var resp = await fetch(API_BASE + '/documents?limit=1');
+                var el = document.getElementById('backend-status');
+                if (resp.ok) {
+                    el.innerHTML = '<span style="color:#52c41a;">在线</span>';
                 } else {
-                    backendStatus.innerHTML = '<span class="text-yellow-600">部分功能异常</span>';
+                    el.innerHTML = '<span style="color:#d4a017;">部分异常</span>';
                 }
-            } catch (error) {
-                backendStatus.innerHTML = '<span class="text-red-600">离线</span>';
-                console.error('后端连接失败:', error);
+            } catch (e) {
+                document.getElementById('backend-status').innerHTML = '<span style="color:#e74c3c;">离线</span>';
             }
         }
-        
-        // ========== 文件拖放功能 ==========
-        
+
+        // ========== 文件拖放 ==========
+
         function setupEventListeners() {
-            // 拖放区域事件
-            dropZone.addEventListener('dragover', (e) => {
+            dropZone.addEventListener('dragover', function(e) {
                 e.preventDefault();
                 dropZone.classList.add('drag-over');
             });
-            
-            dropZone.addEventListener('dragleave', (e) => {
+            dropZone.addEventListener('dragleave', function(e) {
                 e.preventDefault();
                 if (!dropZone.contains(e.relatedTarget)) {
                     dropZone.classList.remove('drag-over');
                 }
             });
-            
-            dropZone.addEventListener('drop', (e) => {
+            dropZone.addEventListener('drop', function(e) {
                 e.preventDefault();
                 dropZone.classList.remove('drag-over');
-                
-                const files = Array.from(e.dataTransfer.files);
-                handleFiles(files);
+                handleFiles(Array.from(e.dataTransfer.files));
             });
-            
-            dropZone.addEventListener('click', () => {
-                fileInput.click();
+            dropZone.addEventListener('click', function() { fileInput.click(); });
+            browseBtn.addEventListener('click', function() { fileInput.click(); });
+            fileInput.addEventListener('change', function(e) {
+                handleFiles(Array.from(e.target.files));
             });
-            
-            browseBtn.addEventListener('click', () => {
-                fileInput.click();
-            });
-            
-            // 文件选择事件
-            fileInput.addEventListener('change', (e) => {
-                const files = Array.from(e.target.files);
-                handleFiles(files);
-            });
-            
-            // 清空文件列表
             clearFilesBtn.addEventListener('click', clearFileList);
-            
-            // 上传按钮
             uploadBtn.addEventListener('click', uploadFiles);
-            
-            // 刷新文档列表
             refreshDocsBtn.addEventListener('click', loadRecentDocuments);
-            
-            // 查看全部文档
             document.getElementById('view-all-docs').addEventListener('click', openDocModal);
-            
-            // 弹窗关闭
             document.getElementById('modal-close').addEventListener('click', closeDocModal);
             document.getElementById('modal-overlay').addEventListener('click', closeDocModal);
-            
-            // 弹窗分页
             document.getElementById('modal-prev-page').addEventListener('click', prevPage);
             document.getElementById('modal-next-page').addEventListener('click', nextPage);
-            
-            // 弹窗搜索
-            let searchTimer;
-            document.getElementById('doc-search').addEventListener('input', () => {
+
+            var searchTimer;
+            document.getElementById('doc-search').addEventListener('input', function() {
                 clearTimeout(searchTimer);
                 searchTimer = setTimeout(applyDocSearch, 300);
             });
-            
-            // ESC关闭弹窗
-            document.addEventListener('keydown', (e) => {
+            document.addEventListener('keydown', function(e) {
                 if (e.key === 'Escape' && !document.getElementById('doc-modal').classList.contains('hidden')) {
                     closeDocModal();
                 }
             });
         }
-        
+
         function handleFiles(files) {
-            // 过滤不支持的文件格式
-            const validFiles = files.filter(file => {
-                const ext = file.name.split('.').pop().toLowerCase();
-                const supported = ['txt', 'md', 'pdf', 'docx', 'csv'];
-                return supported.includes(ext);
+            var validFiles = files.filter(function(file) {
+                var ext = file.name.split('.').pop().toLowerCase();
+                return ['txt', 'md', 'pdf', 'docx', 'csv'].indexOf(ext) >= 0;
             });
-            
-            // 添加到选择列表
-            selectedFiles.push(...validFiles);
+            selectedFiles = selectedFiles.concat(validFiles);
             updateFileList();
-            
-            // 显示文件列表区域
             fileList.classList.remove('hidden');
-            
-            // 如果有不支持的文件，显示提示
-            const invalidCount = files.length - validFiles.length;
+            var invalidCount = files.length - validFiles.length;
             if (invalidCount > 0) {
-                showNotification(`跳过了 ${invalidCount} 个不支持的文件`, 'warning');
+                showNotification('跳过了 ' + invalidCount + ' 个不支持的文件', 'warning');
             }
         }
-        
+
         function updateFileList() {
             selectedFilesContainer.innerHTML = '';
-            
-            selectedFiles.forEach((file, index) => {
-                const fileItem = document.createElement('div');
-                fileItem.className = 'flex items-center justify-between p-3 bg-gray-50 rounded-lg';
-                
-                const fileIcon = getFileIcon(file.name);
-                
-                fileItem.innerHTML = `
-                    <div class="flex items-center">
-                        <div class="text-gray-500 mr-3">
-                            <i class="${fileIcon} text-xl"></i>
-                        </div>
-                        <div>
-                            <p class="font-medium text-gray-900 truncate max-w-xs">${file.name}</p>
-                            <p class="text-sm text-gray-500">${formatFileSize(file.size)}</p>
-                        </div>
-                    </div>
-                    <button class="text-red-500 hover:text-red-700" data-index="${index}">
-                        <i class="fas fa-times"></i>
-                    </button>
-                `;
-                
-                selectedFilesContainer.appendChild(fileItem);
+            selectedFiles.forEach(function(file, index) {
+                var div = document.createElement('div');
+                div.className = 'file-item';
+                var icon = getFileIcon(file.name);
+                div.innerHTML =
+                    '<div style="display:flex;align-items:center;flex:1;min-width:0;">' +
+                    '<span class="file-icon"><i class="' + icon + '"></i></span>' +
+                    '<div style="flex:1;min-width:0;">' +
+                    '<div class="file-name truncate">' + escapeHtml(file.name) + '</div>' +
+                    '<div class="file-size">' + formatFileSize(file.size) + '</div>' +
+                    '</div></div>' +
+                    '<button class="file-del" data-index="' + index + '"><i class="fas fa-times"></i></button>';
+                selectedFilesContainer.appendChild(div);
             });
-            
-            // 添加删除按钮事件
-            selectedFilesContainer.querySelectorAll('button').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const index = parseInt(e.currentTarget.dataset.index);
-                    removeFile(index);
+            selectedFilesContainer.querySelectorAll('.file-del').forEach(function(btn) {
+                btn.addEventListener('click', function(e) {
+                    removeFile(parseInt(e.currentTarget.dataset.index));
                 });
             });
         }
-        
+
         function getFileIcon(filename) {
-            const ext = filename.split('.').pop().toLowerCase();
-            const icons = {
-                txt: 'fas fa-file-alt',
-                md: 'fab fa-markdown',
-                pdf: 'fas fa-file-pdf',
-                docx: 'fas fa-file-word',
-                csv: 'fas fa-file-csv'
-            };
+            var ext = filename.split('.').pop().toLowerCase();
+            var icons = { txt: 'fas fa-file-alt', md: 'fab fa-markdown', pdf: 'fas fa-file-pdf', docx: 'fas fa-file-word', csv: 'fas fa-file-csv' };
             return icons[ext] || 'fas fa-file';
         }
-        
+
         function formatFileSize(bytes) {
             if (bytes === 0) return '0 B';
-            const k = 1024;
-            const sizes = ['B', 'KB', 'MB', 'GB'];
-            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            var k = 1024;
+            var sizes = ['B', 'KB', 'MB', 'GB'];
+            var i = Math.floor(Math.log(bytes) / Math.log(k));
             return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
         }
-        
+
         function removeFile(index) {
             selectedFiles.splice(index, 1);
             updateFileList();
-            
-            if (selectedFiles.length === 0) {
-                fileList.classList.add('hidden');
-            }
+            if (selectedFiles.length === 0) fileList.classList.add('hidden');
         }
-        
+
         function clearFileList() {
             selectedFiles = [];
             fileList.classList.add('hidden');
             fileInput.value = '';
         }
-        
-        // ========== 文件上传功能 ==========
-        
+
+        // ========== 上传 ==========
+
         async function uploadFiles() {
-            if (selectedFiles.length === 0) {
-                showNotification('请先选择文件', 'warning');
-                return;
-            }
-            
-            // 检查文件大小限制 (100MB)
-            const oversizedFiles = selectedFiles.filter(file => file.size > 100 * 1024 * 1024);
-            if (oversizedFiles.length > 0) {
-                showNotification(`文件 ${oversizedFiles[0].name} 超过100MB限制`, 'error');
-                return;
-            }
-            
-            // 创建FormData
-            const formData = new FormData();
-            selectedFiles.forEach(file => {
-                formData.append('files', file);
-            });
-            
-            // 禁用上传按钮
+            if (selectedFiles.length === 0) { showNotification('请先选择文件', 'warning'); return; }
+            var oversized = selectedFiles.filter(function(f) { return f.size > 100 * 1024 * 1024; });
+            if (oversized.length > 0) { showNotification('文件 ' + oversized[0].name + ' 超过100MB限制', 'error'); return; }
+
+            var formData = new FormData();
+            selectedFiles.forEach(function(f) { formData.append('files', f); });
             uploadBtn.disabled = true;
-            uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin mr-2"></i>上传中...';
-            
+            uploadBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i>上传中...';
+
             try {
-                const response = await fetch(`${API_BASE}/upload`, {
-                    method: 'POST',
-                    body: formData
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`上传失败: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                
-                // 显示成功消息
-                showNotification(`任务创建成功: ${result.task_id}`, 'success');
-                
-                // 清空文件列表
+                var resp = await fetch(API_BASE + '/upload', { method: 'POST', body: formData });
+                if (!resp.ok) throw new Error('上传失败: ' + resp.status);
+                var result = await resp.json();
+                showNotification('任务创建成功: ' + result.task_id, 'success');
                 clearFileList();
-                
-                // 添加到任务队列
                 addTaskToQueue(result);
-                
-            } catch (error) {
-                console.error('上传失败:', error);
-                showNotification(`上传失败: ${error.message}`, 'error');
+            } catch (e) {
+                showNotification('上传失败: ' + e.message, 'error');
             } finally {
-                // 恢复上传按钮
                 uploadBtn.disabled = false;
-                uploadBtn.innerHTML = '<i class="fas fa-upload mr-2"></i>开始导入';
+                uploadBtn.innerHTML = '<i class="fas fa-upload"></i>开始导入';
             }
         }
-        
-        // ========== 任务队列管理 ==========
-        
+
+        // ========== 任务队列 ==========
+
         function addTaskToQueue(taskData) {
-            // 隐藏空队列提示
             emptyQueue.classList.add('hidden');
-            
-            // 创建任务项
-            const taskItem = createTaskItem(taskData);
-            taskList.insertBefore(taskItem, taskList.firstChild);
-            
-            // 存储任务数据
-            activeTasks.set(taskData.task_id, {
-                ...taskData,
-                element: taskItem
-            });
-            
-            // 开始轮询任务状态
+            var item = createTaskItem(taskData);
+            taskList.insertBefore(item, taskList.firstChild);
+            activeTasks.set(taskData.task_id, { element: item });
             pollTaskStatus(taskData.task_id);
         }
-        
+
         function createTaskItem(taskData) {
-            const taskItem = document.createElement('div');
-            taskItem.className = 'bg-gray-50 rounded-lg p-4 border border-gray-200';
-            taskItem.id = `task-${taskData.task_id}`;
-            
-            const statusClass = getStatusClass(taskData.status);
-            const statusIcon = getStatusIcon(taskData.status);
-            
-            taskItem.innerHTML = `
-                <div class="flex justify-between items-start mb-2">
-                    <div>
-                        <span class="font-medium text-gray-900">任务 ${taskData.task_id}</span>
-                        <span class="ml-2 text-sm ${statusClass}">
-                            <i class="${statusIcon} mr-1"></i>${taskData.status}
-                        </span>
-                    </div>
-                    <div class="flex space-x-2">
-                        <button class="text-gray-500 hover:text-gray-700 refresh-task" data-task-id="${taskData.task_id}">
-                            <i class="fas fa-redo"></i>
-                        </button>
-                        <button class="text-red-500 hover:text-red-700 cancel-task" data-task-id="${taskData.task_id}">
-                            <i class="fas fa-times"></i>
-                        </button>
-                    </div>
-                </div>
-                
-                <div class="mb-3">
-                    <div class="flex justify-between text-sm text-gray-600 mb-1">
-                        <span>文件: ${taskData.valid_files} 个</span>
-                        <span>${taskData.progress || 0}%</span>
-                    </div>
-                    <div class="w-full bg-gray-200 rounded-full h-2">
-                        <div class="progress-bar bg-blue-600 h-2 rounded-full" style="width: ${taskData.progress || 0}%"></div>
-                    </div>
-                </div>
-                
-                <div class="text-sm text-gray-500">
-                    <div class="grid grid-cols-2 gap-2">
-                        <div>
-                            <i class="fas fa-file mr-1"></i>
-                            已处理: ${taskData.processed_files || 0}/${taskData.total_files || 0}
-                        </div>
-                        <div>
-                            <i class="fas fa-cube mr-1"></i>
-                            Chunks: ${taskData.processed_chunks || 0}/${taskData.total_chunks || 0}
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="task-errors mt-2 hidden">
-                    <!-- 错误信息将动态添加 -->
-                </div>
-            `;
-            
-            // 添加事件监听器
-            taskItem.querySelector('.refresh-task').addEventListener('click', (e) => {
-                const taskId = e.currentTarget.dataset.taskId;
-                pollTaskStatus(taskId);
+            var div = document.createElement('div');
+            div.className = 'task-item';
+            div.id = 'task-' + taskData.task_id;
+            var sc = getStatusClass(taskData.status);
+            var si = getStatusIcon(taskData.status);
+            div.innerHTML =
+                '<div class="task-header">' +
+                '<div><span class="task-id">任务 ' + taskData.task_id + '</span>' +
+                '<span class="task-status ' + sc + '" style="margin-left:8px;"><i class="' + si + '"></i> ' + taskData.status + '</span></div>' +
+                '<div class="task-actions">' +
+                '<button class="refresh-task" data-task-id="' + taskData.task_id + '"><i class="fas fa-redo"></i></button>' +
+                '<button class="cancel-task" data-task-id="' + taskData.task_id + '"><i class="fas fa-times"></i></button></div></div>' +
+                '<div style="margin-bottom:6px;">' +
+                '<div style="display:flex;justify-content:space-between;font-size:11px;color:#5a5a7a;margin-bottom:4px;">' +
+                '<span>文件: ' + (taskData.valid_files || 0) + ' 个</span><span>' + (taskData.progress || 0) + '%</span></div>' +
+                '<div class="progress-track"><div class="progress-bar" style="width:' + (taskData.progress || 0) + '%"></div></div></div>' +
+                '<div class="task-stats">' +
+                '<span><i class="fas fa-file"></i> 已处理: ' + (taskData.processed_files || 0) + '/' + (taskData.total_files || 0) + '</span>' +
+                '<span><i class="fas fa-cube"></i> Chunks: ' + (taskData.processed_chunks || 0) + '/' + (taskData.total_chunks || 0) + '</span></div>' +
+                '<div class="task-errors hidden"></div>';
+
+            div.querySelector('.refresh-task').addEventListener('click', function(e) {
+                pollTaskStatus(e.currentTarget.dataset.taskId);
             });
-            
-            taskItem.querySelector('.cancel-task').addEventListener('click', (e) => {
-                const taskId = e.currentTarget.dataset.taskId;
-                cancelTask(taskId);
+            div.querySelector('.cancel-task').addEventListener('click', function(e) {
+                removeTaskFromQueue(e.currentTarget.dataset.taskId);
+                showNotification('已取消任务', 'info');
             });
-            
-            return taskItem;
+            return div;
         }
-        
+
         function getStatusClass(status) {
-            const classes = {
-                'pending': 'status-pending',
-                'processing': 'status-processing',
-                'completed': 'status-completed',
-                'failed': 'status-failed'
-            };
-            return classes[status] || 'status-pending';
+            var m = { pending: 'status-pending', processing: 'status-processing', completed: 'status-completed', failed: 'status-failed' };
+            return m[status] || 'status-pending';
         }
-        
+
         function getStatusIcon(status) {
-            const icons = {
-                'pending': 'fas fa-clock',
-                'processing': 'fas fa-spinner fa-spin',
-                'completed': 'fas fa-check-circle',
-                'failed': 'fas fa-exclamation-circle'
-            };
-            return icons[status] || 'fas fa-clock';
+            var m = { pending: 'fas fa-clock', processing: 'fas fa-spinner fa-spin', completed: 'fas fa-check-circle', failed: 'fas fa-exclamation-circle' };
+            return m[status] || 'fas fa-clock';
         }
-        
+
         async function pollTaskStatus(taskId) {
             try {
-                const response = await fetch(`${API_BASE}/status/${taskId}`);
-                if (!response.ok) {
-                    throw new Error(`状态查询失败: ${response.status}`);
-                }
-                
-                const taskData = await response.json();
-                
-                // 更新任务数据
+                var resp = await fetch(API_BASE + '/status/' + taskId);
+                if (!resp.ok) throw new Error('状态查询失败');
+                var data = await resp.json();
                 if (activeTasks.has(taskId)) {
-                    const task = activeTasks.get(taskId);
-                    updateTaskItem(task.element, taskData);
-                    activeTasks.set(taskId, { ...task, ...taskData });
-                    
-                    // 如果任务完成，移除或标记
-                    if (taskData.status === 'completed' || taskData.status === 'failed') {
-                        // 5秒后移除任务
-                        setTimeout(() => {
-                            removeTaskFromQueue(taskId);
-                        }, 5000);
-                        
-                        // 刷新统计数据
+                    var task = activeTasks.get(taskId);
+                    updateTaskItem(task.element, data);
+                    if (data.status === 'completed' || data.status === 'failed') {
+                        setTimeout(function() { removeTaskFromQueue(taskId); }, 5000);
                         loadStats();
                         loadRecentDocuments();
                     }
                 }
-                
-            } catch (error) {
-                console.error(`轮询任务状态失败 ${taskId}:`, error);
-            }
+            } catch (e) { console.error('轮询任务状态失败', taskId, e); }
         }
-        
-        function updateTaskItem(taskElement, taskData) {
-            // 更新状态
-            const statusSpan = taskElement.querySelector('span[class*="status-"]');
+
+        function updateTaskItem(el, data) {
+            var statusSpan = el.querySelector('.task-status');
             if (statusSpan) {
-                const statusClass = getStatusClass(taskData.status);
-                const statusIcon = getStatusIcon(taskData.status);
-                
-                statusSpan.className = `ml-2 text-sm ${statusClass}`;
-                statusSpan.innerHTML = `<i class="${statusIcon} mr-1"></i>${taskData.status}`;
+                statusSpan.className = 'task-status ' + getStatusClass(data.status);
+                statusSpan.innerHTML = '<i class="' + getStatusIcon(data.status) + '"></i> ' + data.status;
             }
-            
-            // 更新进度条
-            const progressBar = taskElement.querySelector('.progress-bar');
-            if (progressBar) {
-                progressBar.style.width = `${taskData.progress || 0}%`;
+            var bar = el.querySelector('.progress-bar');
+            if (bar) bar.style.width = (data.progress || 0) + '%';
+            var pct = el.querySelector('.task-header span:last-child');
+            if (pct && pct.parentElement) {
+                var pctSpan = pct.parentElement.querySelector('span:last-child');
+                if (pctSpan) pctSpan.textContent = (data.progress || 0) + '%';
             }
-            
-            // 更新进度文本
-            const progressText = taskElement.querySelector('span:last-child');
-            if (progressText) {
-                progressText.textContent = `${taskData.progress || 0}%`;
+            var stats = el.querySelectorAll('.task-stats span');
+            if (stats.length >= 2) {
+                stats[0].innerHTML = '<i class="fas fa-file"></i> 已处理: ' + (data.processed_files || 0) + '/' + (data.total_files || 0);
+                stats[1].innerHTML = '<i class="fas fa-cube"></i> Chunks: ' + (data.processed_chunks || 0) + '/' + (data.total_chunks || 0);
             }
-            
-            // 更新文件统计
-            const fileStats = taskElement.querySelector('div:nth-child(3) > div:first-child');
-            if (fileStats) {
-                fileStats.innerHTML = `<i class="fas fa-file mr-1"></i>已处理: ${taskData.processed_files || 0}/${taskData.total_files || 0}`;
-            }
-            
-            // 更新chunks统计
-            const chunkStats = taskElement.querySelector('div:nth-child(3) > div:last-child');
-            if (chunkStats) {
-                chunkStats.innerHTML = `<i class="fas fa-cube mr-1"></i>Chunks: ${taskData.processed_chunks || 0}/${taskData.total_chunks || 0}`;
-            }
-            
-            // 显示错误信息
-            if (taskData.errors && taskData.errors.length > 0) {
-                const errorContainer = taskElement.querySelector('.task-errors');
-                errorContainer.classList.remove('hidden');
-                errorContainer.innerHTML = `
-                    <div class="bg-red-50 border-l-4 border-red-500 p-2">
-                        <div class="flex">
-                            <div class="flex-shrink-0">
-                                <i class="fas fa-exclamation-triangle text-red-400"></i>
-                            </div>
-                            <div class="ml-3">
-                                <p class="text-sm text-red-700">
-                                    ${taskData.errors.join('<br>')}
-                                </p>
-                            </div>
-                        </div>
-                    </div>
-                `;
+            if (data.errors && data.errors.length > 0) {
+                var errEl = el.querySelector('.task-errors');
+                errEl.classList.remove('hidden');
+                errEl.innerHTML = '<div class="error-box"><i class="fas fa-exclamation-triangle" style="margin-right:4px;"></i>' + data.errors.join('<br>') + '</div>';
             }
         }
-        
-        function cancelTask(taskId) {
-            // 在实际应用中，这里应该调用API取消任务
-            // 现在只是从前端移除
-            removeTaskFromQueue(taskId);
-            showNotification(`已取消任务: ${taskId}`, 'info');
-        }
-        
+
         function removeTaskFromQueue(taskId) {
-            const task = activeTasks.get(taskId);
-            if (task && task.element) {
-                task.element.remove();
-            }
+            var task = activeTasks.get(taskId);
+            if (task && task.element) task.element.remove();
             activeTasks.delete(taskId);
-            
-            // 如果没有任务了，显示空队列提示
-            if (activeTasks.size === 0) {
-                emptyQueue.classList.remove('hidden');
-            }
+            if (activeTasks.size === 0) emptyQueue.classList.remove('hidden');
         }
-        
+
         function startTaskRefresh() {
-            // 每10秒刷新一次活动任务状态
-            refreshInterval = setInterval(() => {
-                activeTasks.forEach((task, taskId) => {
-                    if (task.status === 'pending' || task.status === 'processing') {
-                        pollTaskStatus(taskId);
-                    }
+            refreshInterval = setInterval(function() {
+                activeTasks.forEach(function(task, taskId) {
+                    pollTaskStatus(taskId);
                 });
             }, 10000);
         }
-        
-        // ========== 统计和文档功能 ==========
-        
+
+        // ========== 统计和文档 ==========
+
         async function loadStats() {
             try {
-                const response = await fetch(`${API_BASE}/stats`);
-                if (response.ok) {
-                    const stats = await response.json();
-                    totalDocsEl.textContent = stats.total_documents || 0;
-                    totalChunksEl.textContent = (stats.total_chunks || 0).toLocaleString();
-                    totalSizeEl.textContent = stats.storage_used_mb
-                        ? `${stats.storage_used_mb.toFixed(1)} MB`
-                        : `${Math.round((stats.total_chunks || 0) * 0.1)} MB`;
-                    
-                    // 更新知识库概览
+                var resp = await fetch(API_BASE + '/stats');
+                if (resp.ok) {
+                    var stats = await resp.json();
+                    document.getElementById('total-docs').textContent = stats.total_documents || 0;
+                    document.getElementById('total-chunks').textContent = (stats.total_chunks || 0).toLocaleString();
+                    document.getElementById('total-size').textContent = stats.storage_used_mb
+                        ? stats.storage_used_mb.toFixed(1) + ' MB'
+                        : Math.round((stats.total_chunks || 0) * 0.1) + ' MB';
                     updateKbOverview(stats);
                 }
-            } catch (error) {
-                console.error('加载统计数据失败:', error);
-            }
+            } catch (e) { console.error('加载统计数据失败:', e); }
         }
-        
-        // 知识库概览
+
         async function updateKbOverview(stats) {
-            // 文件类型分布 - 从文档列表统计
             try {
-                const resp = await fetch(`${API_BASE}/documents?limit=500&offset=0`);
+                var resp = await fetch(API_BASE + '/documents?limit=500&offset=0');
                 if (!resp.ok) throw new Error('加载文档列表失败');
-                const data = await resp.json();
-                const docs = data.documents || [];
-                
-                // 按类型统计
-                const typeCount = {};
-                docs.forEach(doc => {
-                    const type = (doc.file_type || 'other').toUpperCase();
+                var data = await resp.json();
+                var docs = data.documents || [];
+                var typeCount = {};
+                docs.forEach(function(doc) {
+                    var type = (doc.file_type || 'other').toUpperCase();
                     typeCount[type] = (typeCount[type] || 0) + 1;
                 });
-                
-                const total = docs.length;
-                const typeOrder = ['PDF', 'DOCX', 'MD', 'TXT', 'CSV'];
-                const typeIcons = {
-                    'PDF': 'fas fa-file-pdf',
-                    'DOCX': 'fas fa-file-word',
-                    'MD': 'fab fa-markdown',
-                    'TXT': 'fas fa-file-alt',
-                    'CSV': 'fas fa-file-csv'
-                };
-                
-                const distEl = document.getElementById('file-type-dist');
+                var total = docs.length;
+                var typeOrder = ['PDF', 'DOCX', 'MD', 'TXT', 'CSV'];
+                var typeIcons = { PDF: 'fas fa-file-pdf', DOCX: 'fas fa-file-word', MD: 'fab fa-markdown', TXT: 'fas fa-file-alt', CSV: 'fas fa-file-csv' };
+                var distEl = document.getElementById('file-type-dist');
                 if (total === 0) {
-                    distEl.innerHTML = '<div class="text-center text-gray-500 py-2 text-sm">暂无文档</div>';
+                    distEl.innerHTML = '<div style="text-align:center;color:#5a5a7a;font-size:12px;padding:8px 0;">暂无文档</div>';
                 } else {
-                    distEl.innerHTML = typeOrder
-                        .filter(t => typeCount[t])
-                        .map(type => {
-                            const count = typeCount[type] || 0;
-                            const pct = ((count / total) * 100).toFixed(0);
-                            const icon = typeIcons[type] || 'fas fa-file';
-                            return `
-                                <div class="flex items-center justify-between text-sm">
-                                    <div class="flex items-center gap-2">
-                                        <i class="${icon} text-gray-500"></i>
-                                        <span class="text-gray-700">${type}</span>
-                                    </div>
-                                    <div class="flex items-center gap-2">
-                                        <div class="w-24 bg-gray-200 rounded-full h-2">
-                                            <div class="bg-blue-500 h-2 rounded-full" style="width: ${pct}%"></div>
-                                        </div>
-                                        <span class="text-gray-500 text-xs w-16 text-right">${count} 个 (${pct}%)</span>
-                                    </div>
-                                </div>
-                            `;
-                        }).join('');
+                    distEl.innerHTML = typeOrder.filter(function(t) { return typeCount[t]; }).map(function(type) {
+                        var count = typeCount[type] || 0;
+                        var pct = ((count / total) * 100).toFixed(0);
+                        var icon = typeIcons[type] || 'fas fa-file';
+                        return '<div style="display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:6px;">' +
+                            '<div style="display:flex;align-items:center;gap:6px;">' +
+                            '<i class="' + icon + '" style="color:#5a5a7a;"></i>' +
+                            '<span style="color:#9e9e9e;">' + type + '</span></div>' +
+                            '<div style="display:flex;align-items:center;gap:6px;">' +
+                            '<div class="type-bar-track"><div class="type-bar-fill" style="width:' + pct + '%"></div></div>' +
+                            '<span style="color:#5a5a7a;font-size:10px;width:64px;text-align:right;">' + count + ' 个 (' + pct + '%)</span></div></div>';
+                    }).join('');
                 }
-                
-                // 活跃度
-                const activityEl = document.getElementById('kb-activity');
-                const lastImport = stats.last_import_time ? formatDate(stats.last_import_time) : '暂无';
-                const completed24h = stats.completed_tasks_24h || 0;
-                const failed24h = stats.failed_tasks_24h || 0;
-                activityEl.innerHTML = `
-                    <div class="flex justify-between">
-                        <span class="text-gray-600">最近导入</span>
-                        <span class="font-medium">${lastImport}</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-gray-600">24h完成任务</span>
-                        <span class="font-medium text-green-600">${completed24h}</span>
-                    </div>
-                    <div class="flex justify-between">
-                        <span class="text-gray-600">24h失败任务</span>
-                        <span class="font-medium ${failed24h > 0 ? 'text-red-600' : 'text-gray-600'}">${failed24h}</span>
-                    </div>
-                `;
-                
-            } catch (error) {
-                console.error('加载知识库概览失败:', error);
-            }
+                var activityEl = document.getElementById('kb-activity');
+                var lastImport = stats.last_import_time ? formatDate(stats.last_import_time) : '暂无';
+                var completed24h = stats.completed_tasks_24h || 0;
+                var failed24h = stats.failed_tasks_24h || 0;
+                activityEl.innerHTML =
+                    '<div class="info-row"><span class="info-label">最近导入</span><span class="info-value">' + lastImport + '</span></div>' +
+                    '<div class="info-row"><span class="info-label">24h完成任务</span><span class="info-value" style="color:#52c41a;">' + completed24h + '</span></div>' +
+                    '<div class="info-row"><span class="info-label">24h失败任务</span><span class="info-value" style="color:' + (failed24h > 0 ? '#e74c3c' : '#c0c0e0') + ';">' + failed24h + '</span></div>';
+            } catch (e) { console.error('加载知识库概览失败:', e); }
         }
-        
+
         async function loadRecentDocuments() {
             try {
-                const response = await fetch(`${API_BASE}/documents?limit=10`);
-                if (!response.ok) {
-                    throw new Error(`文档列表加载失败: ${response.status}`);
-                }
-                
-                const data = await response.json();
+                var resp = await fetch(API_BASE + '/documents?limit=10');
+                if (!resp.ok) throw new Error('加载失败: ' + resp.status);
+                var data = await resp.json();
                 displayRecentDocuments(data.documents || []);
-                
-            } catch (error) {
-                console.error('加载最近文档失败:', error);
-                recentDocs.innerHTML = `
-                    <div class="text-center text-red-500 py-4">
-                        <i class="fas fa-exclamation-triangle text-2xl mb-2"></i>
-                        <p>加载失败: ${error.message}</p>
-                    </div>
-                `;
+            } catch (e) {
+                recentDocs.innerHTML = '<div style="text-align:center;padding:20px 0;color:#e74c3c;font-size:12px;"><i class="fas fa-exclamation-triangle" style="font-size:20px;margin-bottom:8px;display:block;"></i>加载失败</div>';
             }
         }
-        
-        function displayRecentDocuments(documents) {
-            if (!documents || documents.length === 0) {
-                recentDocs.innerHTML = `
-                    <div class="text-center text-gray-500 py-4">
-                        <i class="fas fa-file-alt text-2xl mb-2"></i>
-                        <p>暂无文档</p>
-                    </div>
-                `;
+
+        function displayRecentDocuments(docs) {
+            if (!docs || docs.length === 0) {
+                recentDocs.innerHTML = '<div style="text-align:center;padding:20px 0;color:#5a5a7a;"><i class="fas fa-file-alt" style="font-size:24px;margin-bottom:8px;display:block;"></i><p style="font-size:12px;">暂无文档</p></div>';
                 return;
             }
-            
             recentDocs.innerHTML = '';
-            
-            documents.forEach(doc => {
-                const docItem = document.createElement('div');
-                docItem.className = 'flex items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition';
-                
-                const fileIcon = getFileIcon(doc.title || 'unknown.txt');
-                
-                docItem.innerHTML = `
-                    <div class="flex-shrink-0 text-gray-500 mr-3">
-                        <i class="${fileIcon} text-xl"></i>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <p class="font-medium text-gray-900 truncate">${doc.title || '未命名文档'}</p>
-                        <div class="flex text-sm text-gray-500 mt-1">
-                            <span class="mr-3">
-                                <i class="fas fa-cube mr-1"></i>${doc.chunks || 0}
-                            </span>
-                            <span>
-                                <i class="fas fa-calendar-alt mr-1"></i>${formatDate(doc.import_time)}
-                            </span>
-                        </div>
-                    </div>
-                `;
-                
-                recentDocs.appendChild(docItem);
+            docs.forEach(function(doc) {
+                var div = document.createElement('div');
+                div.className = 'recent-doc-item';
+                var icon = getFileIcon(doc.title || 'unknown.txt');
+                div.innerHTML =
+                    '<span class="doc-icon"><i class="' + icon + '"></i></span>' +
+                    '<div style="flex:1;min-width:0;">' +
+                    '<div class="doc-title">' + escapeHtml(doc.title || '未命名文档') + '</div>' +
+                    '<div class="doc-meta"><i class="fas fa-cube"></i> ' + (doc.chunks || 0) + ' · ' + formatDate(doc.import_time) + '</div></div>';
+                recentDocs.appendChild(div);
             });
         }
-        
+
         function formatDate(dateString) {
             if (!dateString) return '未知';
-            
             try {
-                const date = new Date(dateString);
-                const now = new Date();
-                const diffMs = now - date;
-                const diffMins = Math.floor(diffMs / 60000);
-                const diffHours = Math.floor(diffMs / 3600000);
-                const diffDays = Math.floor(diffMs / 86400000);
-                
+                var date = new Date(dateString);
+                var now = new Date();
+                var diffMs = now - date;
+                var diffMins = Math.floor(diffMs / 60000);
+                var diffHours = Math.floor(diffMs / 3600000);
+                var diffDays = Math.floor(diffMs / 86400000);
                 if (diffMins < 1) return '刚刚';
-                if (diffMins < 60) return `${diffMins}分钟前`;
-                if (diffHours < 24) return `${diffHours}小时前`;
-                if (diffDays < 7) return `${diffDays}天前`;
-                
+                if (diffMins < 60) return diffMins + '分钟前';
+                if (diffHours < 24) return diffHours + '小时前';
+                if (diffDays < 7) return diffDays + '天前';
                 return date.toLocaleDateString('zh-CN');
-            } catch (e) {
-                return dateString;
-            }
+            } catch (e) { return dateString; }
         }
-        
+
         // ========== 文档管理弹窗 ==========
-        
-        let modalCurrentPage = 0;
-        let modalTotalPages = 0;
-        let modalAllDocs = [];
-        let modalFilteredDocs = [];
-        const MODAL_PAGE_SIZE = 50;
-        
-        // 打开弹窗
+
+        var modalCurrentPage = 0;
+        var modalTotalPages = 0;
+        var modalAllDocs = [];
+        var modalFilteredDocs = [];
+        var MODAL_PAGE_SIZE = 50;
+
         function openDocModal() {
             document.getElementById('doc-modal').classList.remove('hidden');
             document.body.style.overflow = 'hidden';
             loadAllDocuments();
         }
-        
-        // 关闭弹窗
+
         function closeDocModal() {
             document.getElementById('doc-modal').classList.add('hidden');
             document.body.style.overflow = '';
         }
-        
-        // 加载全部文档
+
         async function loadAllDocuments() {
-            const listEl = document.getElementById('modal-doc-list');
-            listEl.innerHTML = '<div class="text-center text-gray-500 py-8"><i class="fas fa-spinner fa-spin text-3xl mb-2"></i><p>加载中...</p></div>';
-            
+            var listEl = document.getElementById('modal-doc-list');
+            listEl.innerHTML = '<div style="text-align:center;padding:32px 0;color:#5a5a7a;"><i class="fas fa-spinner fa-spin" style="font-size:24px;margin-bottom:8px;display:block;"></i><p style="font-size:12px;">加载中...</p></div>';
             try {
-                const response = await fetch(`${API_BASE}/documents?limit=500&offset=0`);
-                if (!response.ok) throw new Error(`加载失败: ${response.status}`);
-                
-                const data = await response.json();
+                var resp = await fetch(API_BASE + '/documents?limit=500&offset=0');
+                if (!resp.ok) throw new Error('加载失败');
+                var data = await resp.json();
                 modalAllDocs = data.documents || [];
-                
-                // 应用搜索过滤
                 applyDocSearch();
-                
-            } catch (error) {
-                listEl.innerHTML = `<div class="text-center text-red-500 py-8"><i class="fas fa-exclamation-triangle text-3xl mb-2"></i><p>加载失败: ${error.message}</p></div>`;
+            } catch (e) {
+                listEl.innerHTML = '<div style="text-align:center;padding:32px 0;color:#e74c3c;font-size:12px;"><i class="fas fa-exclamation-triangle" style="font-size:24px;margin-bottom:8px;display:block;"></i>加载失败: ' + e.message + '</div>';
             }
         }
-        
-        // 搜索过滤
+
         function applyDocSearch() {
-            const searchText = document.getElementById('doc-search').value.trim().toLowerCase();
+            var searchText = document.getElementById('doc-search').value.trim().toLowerCase();
             if (searchText) {
-                modalFilteredDocs = modalAllDocs.filter(doc => 
-                    (doc.title || '').toLowerCase().includes(searchText) ||
-                    (doc.file_type || '').toLowerCase().includes(searchText)
-                );
+                modalFilteredDocs = modalAllDocs.filter(function(doc) {
+                    return (doc.title || '').toLowerCase().indexOf(searchText) >= 0 ||
+                           (doc.file_type || '').toLowerCase().indexOf(searchText) >= 0;
+                });
             } else {
-                modalFilteredDocs = [...modalAllDocs];
+                modalFilteredDocs = modalAllDocs.slice();
             }
-            
             modalTotalPages = Math.ceil(modalFilteredDocs.length / MODAL_PAGE_SIZE) || 1;
             modalCurrentPage = 0;
             renderDocPage();
         }
-        
-        // 渲染当前页
+
         function renderDocPage() {
-            const listEl = document.getElementById('modal-doc-list');
-            const pageInfo = document.getElementById('modal-page-info');
-            const prevBtn = document.getElementById('modal-prev-page');
-            const nextBtn = document.getElementById('modal-next-page');
-            
-            const start = modalCurrentPage * MODAL_PAGE_SIZE;
-            const end = Math.min(start + MODAL_PAGE_SIZE, modalFilteredDocs.length);
-            const pageDocs = modalFilteredDocs.slice(start, end);
-            
+            var listEl = document.getElementById('modal-doc-list');
+            var pageInfo = document.getElementById('modal-page-info');
+            var prevBtn = document.getElementById('modal-prev-page');
+            var nextBtn = document.getElementById('modal-next-page');
+            var start = modalCurrentPage * MODAL_PAGE_SIZE;
+            var end = Math.min(start + MODAL_PAGE_SIZE, modalFilteredDocs.length);
+            var pageDocs = modalFilteredDocs.slice(start, end);
+
             if (modalFilteredDocs.length === 0) {
-                listEl.innerHTML = '<div class="text-center text-gray-500 py-8"><i class="fas fa-inbox text-3xl mb-2"></i><p>暂无文档</p></div>';
+                listEl.innerHTML = '<div style="text-align:center;padding:32px 0;color:#5a5a7a;"><i class="fas fa-inbox" style="font-size:24px;margin-bottom:8px;display:block;"></i><p style="font-size:12px;">暂无文档</p></div>';
                 pageInfo.textContent = '第 0/0 页';
                 prevBtn.disabled = true;
                 nextBtn.disabled = true;
                 return;
             }
-            
-            listEl.innerHTML = pageDocs.map((doc, idx) => {
-                const fileIcon = getFileIcon(doc.title || 'unknown.txt');
-                const typeLabel = (doc.file_type || '').toUpperCase();
-                return `
-                    <div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition group" data-doc-id="${escapeHtml(doc.doc_id)}">
-                        <div class="flex items-center flex-1 min-w-0">
-                            <div class="flex-shrink-0 text-gray-500 mr-3">
-                                <i class="${fileIcon} text-xl"></i>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <p class="font-medium text-gray-900 truncate">${escapeHtml(doc.title || '未命名文档')}</p>
-                                <div class="flex items-center text-sm text-gray-500 mt-1 gap-3">
-                                    <span class="px-2 py-0.5 bg-gray-200 rounded text-xs font-medium">${typeLabel}</span>
-                                    <span><i class="fas fa-cube mr-1"></i>${doc.chunks || 0} chunks</span>
-                                    <span><i class="fas fa-calendar-alt mr-1"></i>${formatDate(doc.import_time)}</span>
-                                </div>
-                            </div>
-                        </div>
-                        <button class="ml-3 p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded-lg opacity-0 group-hover:opacity-100 transition-all delete-doc-btn" 
-                                data-doc-id="${escapeHtml(doc.doc_id)}" data-doc-title="${escapeHtml(doc.title || '未命名文档')}"
-                                title="删除文档">
-                            <i class="fas fa-trash-alt"></i>
-                        </button>
-                    </div>
-                `;
+
+            listEl.innerHTML = pageDocs.map(function(doc) {
+                var icon = getFileIcon(doc.title || 'unknown.txt');
+                var typeLabel = (doc.file_type || '').toUpperCase();
+                return '<div class="modal-doc-item" data-doc-id="' + escapeHtml(doc.doc_id) + '">' +
+                    '<div class="doc-info">' +
+                    '<span class="doc-icon"><i class="' + icon + '"></i></span>' +
+                    '<div style="flex:1;min-width:0;">' +
+                    '<div class="doc-name">' + escapeHtml(doc.title || '未命名文档') + '</div>' +
+                    '<div class="doc-detail">' +
+                    '<span class="doc-type-tag">' + typeLabel + '</span> ' +
+                    '<i class="fas fa-cube"></i> ' + (doc.chunks || 0) + ' chunks · ' + formatDate(doc.import_time) +
+                    '</div></div></div>' +
+                    '<button class="doc-del delete-doc-btn" data-doc-id="' + escapeHtml(doc.doc_id) + '" data-doc-title="' + escapeHtml(doc.title || '未命名文档') + '" title="删除"><i class="fas fa-trash-alt"></i></button></div>';
             }).join('');
-            
-            // 绑定删除按钮
-            listEl.querySelectorAll('.delete-doc-btn').forEach(btn => {
-                btn.addEventListener('click', (e) => {
-                    const docId = e.currentTarget.dataset.docId;
-                    const docTitle = e.currentTarget.dataset.docTitle;
-                    deleteDocument(docId, docTitle);
+
+            listEl.querySelectorAll('.delete-doc-btn').forEach(function(btn) {
+                btn.addEventListener('click', function(e) {
+                    deleteDocument(e.currentTarget.dataset.docId, e.currentTarget.dataset.docTitle);
                 });
             });
-            
-            // 更新分页
-            const currentPageNum = modalCurrentPage + 1;
-            pageInfo.textContent = `第 ${currentPageNum}/${modalTotalPages} 页（共 ${modalFilteredDocs.length} 条）`;
+
+            var currentPageNum = modalCurrentPage + 1;
+            pageInfo.textContent = '第 ' + currentPageNum + '/' + modalTotalPages + ' 页（共 ' + modalFilteredDocs.length + ' 条）';
             prevBtn.disabled = modalCurrentPage <= 0;
             nextBtn.disabled = modalCurrentPage >= modalTotalPages - 1;
         }
-        
-        // 删除文档
+
         async function deleteDocument(docId, docTitle) {
-            if (!confirm(`确定要删除「${docTitle}」吗？此操作不可撤销。`)) {
-                return;
-            }
-            
+            if (!confirm('确定要删除「' + docTitle + '」吗？')) return;
             try {
-                const response = await fetch(`${API_BASE}/${docId}`, {
-                    method: 'DELETE'
-                });
-                
-                if (!response.ok) {
-                    throw new Error(`删除失败: ${response.status}`);
-                }
-                
-                const result = await response.json();
-                showNotification(`已删除「${docTitle}」(${result.deleted_chunks || 0}个chunks)`, 'success');
-                
-                // 刷新文档列表和统计
+                var resp = await fetch(API_BASE + '/' + docId, { method: 'DELETE' });
+                if (!resp.ok) throw new Error('删除失败: ' + resp.status);
+                var result = await resp.json();
+                showNotification('已删除「' + docTitle + '」(' + (result.deleted_chunks || 0) + '个chunks)', 'success');
                 loadAllDocuments();
                 loadStats();
                 loadRecentDocuments();
-                
-            } catch (error) {
-                showNotification(`删除失败: ${error.message}`, 'error');
+            } catch (e) {
+                showNotification('删除失败: ' + e.message, 'error');
             }
         }
-        
-        // 分页事件
+
         function prevPage() {
-            if (modalCurrentPage > 0) {
-                modalCurrentPage--;
-                renderDocPage();
-            }
+            if (modalCurrentPage > 0) { modalCurrentPage--; renderDocPage(); }
         }
-        
+
         function nextPage() {
-            if (modalCurrentPage < modalTotalPages - 1) {
-                modalCurrentPage++;
-                renderDocPage();
-            }
+            if (modalCurrentPage < modalTotalPages - 1) { modalCurrentPage++; renderDocPage(); }
         }
-        
-        // ========== 工具函数 ==========
-        
+
+        // ========== 通知 ==========
+
+        function showNotification(message, type) {
+            type = type || 'info';
+            var container = document.getElementById('notification-container');
+            var n = document.createElement('div');
+            n.className = 'notification notification-' + type;
+            var icons = { success: 'fas fa-check-circle', error: 'fas fa-exclamation-circle', warning: 'fas fa-exclamation-triangle', info: 'fas fa-info-circle' };
+            n.innerHTML = '<i class="' + (icons[type] || icons.info) + '"></i>' + escapeHtml(message);
+            container.appendChild(n);
+            setTimeout(function() { n.classList.add('show'); }, 10);
+            setTimeout(function() {
+                n.classList.remove('show');
+                setTimeout(function() { if (n.parentNode) n.parentNode.removeChild(n); }, 300);
+            }, 3000);
+        }
+
         function escapeHtml(text) {
             if (!text) return '';
-            const div = document.createElement('div');
+            var div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
-        
-        function showNotification(message, type = 'info') {
-            // 创建通知元素
-            const notification = document.createElement('div');
-            notification.className = `fixed top-4 right-4 z-50 px-6 py-3 rounded-lg shadow-lg transform transition-all duration-300 translate-x-full`;
-            
-            const icons = {
-                'success': 'fas fa-check-circle',
-                'error': 'fas fa-exclamation-circle',
-                'warning': 'fas fa-exclamation-triangle',
-                'info': 'fas fa-info-circle'
-            };
-            
-            const colors = {
-                'success': 'bg-green-100 text-green-800 border-green-200',
-                'error': 'bg-red-100 text-red-800 border-red-200',
-                'warning': 'bg-yellow-100 text-yellow-800 border-yellow-200',
-                'info': 'bg-blue-100 text-blue-800 border-blue-200'
-            };
-            
-            notification.innerHTML = `
-                <div class="flex items-center">
-                    <i class="${icons[type] || icons.info} mr-3 text-lg"></i>
-                    <span>${message}</span>
-                </div>
-            `;
-            
-            notification.className += ` ${colors[type] || colors.info} border-l-4`;
-            
-            // 添加到页面
-            document.body.appendChild(notification);
-            
-            // 显示动画
-            setTimeout(() => {
-                notification.classList.remove('translate-x-full');
-                notification.classList.add('translate-x-0');
-            }, 10);
-            
-            // 3秒后自动消失
-            setTimeout(() => {
-                notification.classList.remove('translate-x-0');
-                notification.classList.add('translate-x-full');
-                
-                setTimeout(() => {
-                    if (notification.parentNode) {
-                        notification.parentNode.removeChild(notification);
-                    }
-                }, 300);
-            }, 3000);
-        }
-        
+
         // ========== 页面初始化 ==========
-        
-        // 页面加载完成后初始化
+
         document.addEventListener('DOMContentLoaded', init);
-        
-        // 清理定时器
-        window.addEventListener('beforeunload', () => {
-            if (refreshInterval) {
-                clearInterval(refreshInterval);
-            }
+        window.addEventListener('beforeunload', function() {
+            if (refreshInterval) clearInterval(refreshInterval);
         });
     </script>
 </body>
