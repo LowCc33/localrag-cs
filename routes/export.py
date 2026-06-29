@@ -11,7 +11,7 @@ import io
 import logging
 import os
 from datetime import datetime
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -83,7 +83,7 @@ def _export_docx(items: List[ExportItem], title: str) -> bytes:
         Word 文档字节流
     """
     from docx import Document
-    from docx.shared import Pt, Inches, RGBColor
+    from docx.shared import Pt, RGBColor
     from docx.enum.text import WD_ALIGN_PARAGRAPH
 
     doc = Document()
@@ -131,7 +131,7 @@ def _export_docx(items: List[ExportItem], title: str) -> bytes:
     doc.add_paragraph()
     footer_para = doc.add_paragraph()
     footer_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    footer_run = footer_para.add_run(f"—— 由 LocalRAG-CS 智能客服系统生成 ——")
+    footer_run = footer_para.add_run("—— 由 LocalRAG-CS 智能客服系统生成 ——")
     footer_run.font.size = Pt(9)
     footer_run.font.color.rgb = RGBColor(150, 150, 150)
 
@@ -157,12 +157,12 @@ def _export_pdf(items: List[ExportItem], title: str) -> bytes:
     """
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.lib.units import mm, cm
+    from reportlab.lib.units import cm
     from reportlab.lib.colors import HexColor
     from reportlab.platypus import (
-        SimpleDocTemplate, Paragraph, Spacer, HRFlowable, PageBreak
+        SimpleDocTemplate, Paragraph, Spacer, HRFlowable
     )
-    from reportlab.lib.enums import TA_CENTER, TA_LEFT
+    from reportlab.lib.enums import TA_CENTER
 
     buf = io.BytesIO()
 
@@ -284,7 +284,7 @@ def _export_rtf(items: List[ExportItem], title: str) -> bytes:
             lines.append(f"\\pard\\fi400\\fs16\\i {_escape_rtf(sources_text)}\\i0\\par")
 
         lines.append("\\par")
-        lines.append(f"\\pard\\qc\\fs16 " + "─" * 50 + "\\par")
+        lines.append("\\pard\\qc\\fs16 " + "─" * 50 + "\\par")
         lines.append("\\par")
 
     # 页脚

@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 import logging
-from typing import List, Optional, TYPE_CHECKING
+from typing import List, Optional
 
 import requests
 
@@ -60,7 +60,7 @@ class EmbeddingClient:
         # 测试连接
         try:
             self._test_connection()
-            logger.info(f"llama.cpp 服务连接成功")
+            logger.info("llama.cpp 服务连接成功")
         except Exception as e:
             logger.warning(f"llama.cpp 服务连接测试失败: {e}，但客户端仍可创建")
     

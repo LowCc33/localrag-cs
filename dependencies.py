@@ -6,9 +6,7 @@
 使用 @lru_cache 确保每个客户端只初始化一次
 """
 
-import time
 import logging
-from functools import lru_cache
 from typing import Optional
 
 from fastapi import Request, HTTPException

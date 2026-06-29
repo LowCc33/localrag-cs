@@ -390,7 +390,7 @@ class HybridRetriever:
         
         # 按新得分重排
         results.sort(key=lambda x: x.get('_score', 0), reverse=True)
-        logger.info(f"规则重排完成")
+        logger.info("规则重排完成")
         return results
     
     @staticmethod

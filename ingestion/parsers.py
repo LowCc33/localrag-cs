@@ -521,7 +521,6 @@ class CSVParser(BaseParser):
     def __init__(self):
         super().__init__()
         self.supported_extensions = ['.csv']
-        import csv
         self._csv_available = True
     
     def parse(self, file_path: Path) -> Optional[str]:

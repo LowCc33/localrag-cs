@@ -83,7 +83,7 @@ class RerankerClient:
                 return False
                 
         except requests.exceptions.ConnectionError:
-            logger.error(f"✗ Reranker 服务连接失败，请检查服务是否启动 (port 8082)")
+            logger.error("✗ Reranker 服务连接失败，请检查服务是否启动 (port 8082)")
             return False
         except Exception as e:
             logger.error(f"✗ Reranker 服务连接测试异常: {e}")

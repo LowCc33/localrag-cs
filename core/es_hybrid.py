@@ -3,7 +3,7 @@ LocalRAG-CS 混合检索模块
 实现BM25检索和RRF融合排序
 """
 import logging
-from typing import Optional, List, Dict, Any, Tuple
+from typing import Optional, List, Dict, Any
 
 import sys
 from pathlib import Path

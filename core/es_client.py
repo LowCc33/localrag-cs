@@ -10,7 +10,7 @@ LocalRAG-CS ES客户端核心模块（阶段2完整版）
 """
 import logging
 import time
-from typing import Optional, List, Dict, Any, Union
+from typing import Optional, List, Dict, Any
 from elasticsearch import Elasticsearch, helpers
 from elasticsearch.exceptions import NotFoundError
 

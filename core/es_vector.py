@@ -3,8 +3,8 @@ LocalRAG-CS ES向量检索扩展模块
 提供向量索引创建、向量文档插入、语义检索功能
 """
 import logging
-from typing import Optional, List, Dict, Any, Tuple
-from elasticsearch import Elasticsearch, helpers
+from typing import Optional, List, Dict, Any
+from elasticsearch import helpers
 
 import sys
 from pathlib import Path

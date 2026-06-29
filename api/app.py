@@ -41,16 +41,15 @@ if str(PROJECT_ROOT) not in sys.path:
 # FastAPI 相关导入
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 
 # 导入依赖管理
-from dependencies import initialize_clients, get_client_manager
+from dependencies import initialize_clients
 
 # 导入路由
-from routes import health, ask, cache as cache_route, session as session_route, export as export_route, chunks as chunks_route
+from routes import health, ask, cache as cache_route, session as session_route, export as export_route, chunks as chunks_route, public as public_route
 from api import ingest_router
 
 
@@ -214,6 +213,9 @@ app.include_router(export_route.router)
 # 包含 chunk 管理路由（/api/chunks）
 app.include_router(chunks_route.router)
 
+# 包含公网暴露路由（/api/public/health）
+app.include_router(public_route.router)
+
 
 # ============== 页面路由 ==============
 
@@ -243,11 +245,14 @@ async def admin_page(request: Request):
 async def ping():
     """
     简单的Ping接口，用于快速检查服务是否存活
+    返回公网地址信息，方便外网访问时确认
     """
+    from config import PUBLIC_URL
     return {
         "status": "pong",
         "timestamp": datetime.now().isoformat(),
-        "service": "localrag-cs-api"
+        "service": "localrag-cs-api",
+        "public_url": PUBLIC_URL
     }
 
 
@@ -306,7 +311,7 @@ if __name__ == "__main__":
     reload = os.environ.get("API_RELOAD", "false").lower() == "true"
     
     logger.info("=" * 60)
-    logger.info(f"🚀 启动 LocalRAG-CS API 服务")
+    logger.info("🚀 启动 LocalRAG-CS API 服务")
     logger.info(f"   地址: http://{host}:{port}")
     logger.info(f"   文档: http://{host}:{port}/docs")
     logger.info(f"   热重载: {reload}")

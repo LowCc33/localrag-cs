@@ -152,6 +152,20 @@ SSE_EVENT_ERROR = 'error'        # 流异常事件
 # SSE 心跳消息间隔（单位：秒），防止代理/网关把长连接当成超时断开
 SSE_HEARTBEAT_INTERVAL = int(os.getenv('SSE_HEARTBEAT_INTERVAL', 15))
 
+# ========== 公网暴露模块配置（任务：ngrok-public-module） ==========
+# -----------------------------------------------------------------------------
+# ngrok 公网地址，用于从外网访问 LocalRAG-CS
+# 支持通过环境变量覆盖，方便不同环境切换
+# ngrok 启动命令: ngrok http 8080 --domain skedaddle-morphine-shamrock.ngrok-free.dev
+# -----------------------------------------------------------------------------
+PUBLIC_URL = os.getenv('PUBLIC_URL', 'https://skedaddle-morphine-shamrock.ngrok-free.dev')
+# 公网服务端口（start_public.sh 启动时 uvicorn 监听此端口，与 ngrok 转发端口一致）
+PUBLIC_PORT = int(os.getenv('PUBLIC_PORT', 8080))
+# ngrok 可执行文件路径
+NGROK_PATH = os.getenv('NGROK_PATH', '/usr/local/bin/ngrok')
+# ngrok 管理面板地址
+NGROK_ADMIN_URL = os.getenv('NGROK_ADMIN_URL', 'http://127.0.0.1:4040')
+
 # LLM 系统提示词
 LLM_SYSTEM_PROMPT = """你是一个专业的问答助手。请严格基于提供的上下文信息回答用户的问题。
 要求：
@@ -185,6 +199,21 @@ CACHE_KEY_PREFIX = 'localrag:cache:'
 CACHE_TTL_SECONDS = int(os.getenv('CACHE_TTL_SECONDS', 86400))
 # 单 session 统计 key（命中数/未命中数/总响应时间累计，用于 /api/cache/stats）
 CACHE_STATS_KEY = 'localrag:cache:stats'
+
+# ========== 公网暴露配置 ==========
+# -----------------------------------------------------------------------------
+# ngrok 公网暴露模块配置
+# 通过 ngrok 将 LocalRAG-CS 暴露到公网，方便外网访问
+# 支持通过环境变量 PUBLIC_URL 覆盖，方便不同环境切换
+# -----------------------------------------------------------------------------
+# 公网访问地址（ngrok 分配的域名）
+PUBLIC_URL = os.getenv('PUBLIC_URL', 'https://skedaddle-morphine-shamrock.ngrok-free.dev')
+# ngrok 可执行文件路径（自动检测 PATH 中的 ngrok）
+NGROK_PATH = os.getenv('NGROK_PATH', '/usr/local/bin/ngrok')
+# ngrok 转发目标端口（ngrok 转发到本机的端口）
+NGROK_TARGET_PORT = int(os.getenv('NGROK_TARGET_PORT', 8080))
+# ngrok 管理面板地址
+NGROK_ADMIN_URL = os.getenv('NGROK_ADMIN_URL', 'http://127.0.0.1:4040')
 
 # ========== 数据导入接口配置 ==========
 # -----------------------------------------------------------------------------

@@ -87,7 +87,7 @@ class LLMClient:
                 return False
 
         except requests.exceptions.ConnectionError:
-            logger.error(f"✗ LLM 服务连接失败，请检查服务是否启动 (port 8080)")
+            logger.error("✗ LLM 服务连接失败，请检查服务是否启动 (port 8080)")
             return False
         except Exception as e:
             logger.error(f"✗ LLM 服务连接测试异常: {e}")
