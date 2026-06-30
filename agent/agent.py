@@ -160,6 +160,16 @@ class Agent:
                 trace_step["output"] = tool_result
                 trace.append(trace_step)
 
+                # generate_answer 是最终回答工具，执行完直接返回结果
+                if tool_name == "generate_answer":
+                    answer_text = tool_result.get("answer", "")
+                    logger.info("✅ Agent 任务完成（generate_answer 返回最终回答）")
+                    return {
+                        "answer": answer_text,
+                        "agent_trace": trace,
+                        "status": "success",
+                    }
+
                 # 把工具结果加回消息列表
                 # 格式化成 DeepSeek 能理解的 tool 消息
                 messages.append({
