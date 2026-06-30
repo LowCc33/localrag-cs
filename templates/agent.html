@@ -1,0 +1,874 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LocalRAG-CS Agent模式</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ============ 全局 ============ */
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4a4a6c; }
+
+        /* ============ 顶栏 ============ */
+        .topbar {
+            background: #1e1e2e;
+            border-bottom: 1px solid #2a2a4a;
+            padding: 0 20px;
+            height: 56px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+        .topbar-logo {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .topbar-logo .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: linear-gradient(135deg, #6c63ff, #7c6fff);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 800;
+            font-size: 16px;
+            color: #fff;
+        }
+        .topbar-logo .logo-text {
+            font-size: 16px;
+            font-weight: 700;
+            color: #e0e0e0;
+            letter-spacing: 0.5px;
+        }
+        .topbar-logo .logo-sub {
+            font-size: 11px;
+            color: #7a7a9a;
+            margin-left: 4px;
+        }
+
+        /* ============ 对话区 ============ */
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 0;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-area::-webkit-scrollbar { width: 6px; }
+        .chat-area::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 3px; }
+
+        .chat-container {
+            max-width: 800px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 0 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ============ 消息 ============ */
+        .msg-row {
+            display: flex;
+            margin-bottom: 24px;
+            animation: fadeIn 0.3s ease;
+        }
+        .msg-row-user { justify-content: flex-end; }
+        .msg-row-ai { justify-content: flex-start; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .msg-bubble {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            line-height: 1.6;
+            font-size: 14px;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        .msg-bubble-user {
+            background: #2d2d5e;
+            color: #e0e0e0;
+            border-bottom-right-radius: 4px;
+        }
+        .msg-bubble-ai {
+            background: transparent;
+            color: #e0e0e0;
+            padding: 4px 0;
+        }
+
+        .msg-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 14px;
+            flex-shrink: 0;
+            margin-right: 10px;
+        }
+        .msg-avatar-ai {
+            background: linear-gradient(135deg, #6c63ff, #7c6fff);
+            color: #fff;
+        }
+
+        .msg-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .msg-role-label {
+            font-size: 12px;
+            font-weight: 600;
+            color: #9e9e9e;
+        }
+
+        /* ============ Agent 思考过程面板 ============ */
+        .agent-trace-panel {
+            margin: 8px 0 12px;
+            border: 1px solid #2a2a4a;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #1a1a2e;
+        }
+        .agent-trace-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: #1e1e2e;
+            cursor: pointer;
+            user-select: none;
+            transition: background 0.2s;
+        }
+        .agent-trace-header:hover {
+            background: #2a2a4a;
+        }
+        .agent-trace-header .trace-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: #9e9e9e;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .agent-trace-header .trace-toggle {
+            font-size: 10px;
+            color: #5a5a7a;
+            transition: transform 0.2s;
+        }
+        .agent-trace-header .trace-toggle.open {
+            transform: rotate(180deg);
+        }
+        .agent-trace-body {
+            padding: 8px 12px 12px;
+        }
+        .agent-trace-body.hidden {
+            display: none;
+        }
+
+        /* Agent 步骤卡片 */
+        .trace-step {
+            padding: 10px 12px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            border: 1px solid #2a2a4a;
+            background: #1e1e2e;
+        }
+        .trace-step:last-child {
+            margin-bottom: 0;
+        }
+        .trace-step .step-header {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+        .trace-step .step-number {
+            font-size: 11px;
+            font-weight: 600;
+            color: #7a7a9a;
+        }
+        .trace-step .step-action {
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .trace-step .step-action.retrieve {
+            color: #4a6cf7;
+        }
+        .trace-step .step-action.generate {
+            color: #7c6fff;
+        }
+        .trace-step .step-action.fallback {
+            color: #d4a017;
+        }
+        .trace-step .step-detail {
+            font-size: 12px;
+            color: #9e9e9e;
+            line-height: 1.5;
+        }
+        .trace-step .step-detail-label {
+            font-size: 10px;
+            color: #5a5a7a;
+            margin-top: 4px;
+            margin-bottom: 2px;
+        }
+        .trace-step .step-detail-code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 11px;
+            color: #c0c0e0;
+            background: #1a1a2e;
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid #2a2a4a;
+            white-space: pre-wrap;
+            word-break: break-all;
+            max-height: 120px;
+            overflow-y: auto;
+        }
+        .trace-step .step-detail-text {
+            font-size: 12px;
+            color: #b0b0c0;
+            padding: 4px 0;
+        }
+        .trace-step .step-divider {
+            border: none;
+            border-top: 1px dashed #2a2a4a;
+            margin: 8px 0;
+        }
+
+        /* ============ 状态条 ============ */
+        .status-bar {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-size: 11px;
+            margin: 4px 0 8px;
+        }
+        .status-bar.success {
+            background: rgba(45, 106, 79, 0.15);
+            color: #52c41a;
+            border: 1px solid rgba(45, 106, 79, 0.3);
+        }
+        .status-bar.fallback {
+            background: rgba(212, 160, 23, 0.15);
+            color: #d4a017;
+            border: 1px solid rgba(212, 160, 23, 0.3);
+        }
+        .status-bar.error {
+            background: rgba(231, 76, 60, 0.15);
+            color: #e74c3c;
+            border: 1px solid rgba(231, 76, 60, 0.3);
+        }
+
+        /* ============ 最终回答 ============ */
+        .final-answer {
+            margin-top: 4px;
+            padding: 12px 16px;
+            background: #1e1e3e;
+            border-radius: 12px;
+            border: 1px solid #2a2a4a;
+            line-height: 1.7;
+            font-size: 14px;
+            color: #e0e0e0;
+            white-space: pre-wrap;
+        }
+        .final-answer-label {
+            font-size: 11px;
+            font-weight: 600;
+            color: #7a7a9a;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        /* ============ 输入区 ============ */
+        .input-area {
+            background: #1e1e2e;
+            border-top: 1px solid #2a2a4a;
+            padding: 12px 20px 16px;
+            flex-shrink: 0;
+        }
+        .input-container {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            align-items: flex-end;
+            gap: 8px;
+            background: #2a2a4a;
+            border-radius: 16px;
+            padding: 8px 12px;
+            border: 1px solid #3a3a5c;
+            transition: border-color 0.2s;
+        }
+        .input-container:focus-within {
+            border-color: #6c63ff;
+        }
+        .input-container textarea {
+            flex: 1;
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #e0e0e0;
+            font-size: 14px;
+            line-height: 1.5;
+            resize: none;
+            max-height: 120px;
+            padding: 4px 0;
+            font-family: inherit;
+        }
+        .input-container textarea::placeholder {
+            color: #5a5a7a;
+        }
+        .input-container .send-btn {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            background: #6c63ff;
+            color: #fff;
+            border: none;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-shrink: 0;
+            transition: background 0.2s, opacity 0.2s;
+        }
+        .input-container .send-btn:hover { background: #7c6fff; }
+        .input-container .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .input-container .send-btn i { font-size: 14px; }
+
+        /* ============ 顶部按钮 ============ */
+        .topbar-btn {
+            padding: 6px 14px;
+            border-radius: 8px;
+            font-size: 12px;
+            cursor: pointer;
+            border: 1px solid #3a3a5c;
+            background: transparent;
+            color: #9e9e9e;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .topbar-btn:hover {
+            border-color: #6c63ff;
+            color: #c0c0e0;
+        }
+        .topbar-btn-primary {
+            background: #6c63ff;
+            color: #fff;
+            border-color: #6c63ff;
+        }
+        .topbar-btn-primary:hover {
+            background: #7c6fff;
+        }
+
+        /* ============ 空状态 ============ */
+        .empty-state {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            color: #5a5a7a;
+            text-align: center;
+            padding: 40px 20px;
+        }
+        .empty-state .empty-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+            opacity: 0.6;
+        }
+        .empty-state h2 {
+            font-size: 18px;
+            font-weight: 600;
+            color: #9e9e9e;
+            margin-bottom: 8px;
+        }
+        .empty-state p {
+            font-size: 13px;
+            color: #5a5a7a;
+            max-width: 400px;
+        }
+
+        /* ============ 加载中动画 ============ */
+        .thinking-dots {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 8px 0;
+        }
+        .thinking-dots span {
+            width: 6px; height: 6px;
+            border-radius: 50%;
+            background: #6c63ff;
+            animation: dotPulse 1.4s infinite ease-in-out both;
+        }
+        .thinking-dots span:nth-child(1) { animation-delay: -0.32s; }
+        .thinking-dots span:nth-child(2) { animation-delay: -0.16s; }
+        .thinking-dots span:nth-child(3) { animation-delay: 0s; }
+        @keyframes dotPulse {
+            0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+            40% { transform: scale(1); opacity: 1; }
+        }
+
+        /* ============ 清空按钮 ============ */
+        .clear-btn {
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 11px;
+            cursor: pointer;
+            border: 1px solid #3a3a5c;
+            background: transparent;
+            color: #5a5a7a;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+        .clear-btn:hover {
+            border-color: #e74c3c;
+            color: #e74c3c;
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ============ 顶栏 ============ -->
+    <header class="topbar">
+        <div class="topbar-logo">
+            <div class="logo-icon">R</div>
+            <span class="logo-text">LocalRAG-CS</span>
+            <span class="logo-sub">Agent 模式</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;">
+            <button class="topbar-btn" onclick="window.location.href='/'">
+                <i class="fas fa-comment"></i>智能问答
+            </button>
+            <button class="topbar-btn" onclick="window.location.href='/ingest'">
+                <i class="fas fa-database"></i>知识库管理
+            </button>
+            <button class="topbar-btn" onclick="window.location.href='/chunks'">
+                <i class="fas fa-cubes"></i>Chunk 管理
+            </button>
+            <button class="topbar-btn topbar-btn-primary" onclick="window.location.href='/agent'">
+                <i class="fas fa-robot"></i>Agent 模式
+            </button>
+            <div id="status-indicator" style="display:flex;align-items:center;gap:6px;padding:4px 10px;background:rgba(45,106,79,0.2);border-radius:9999px;font-size:11px;color:#52c41a;">
+                <div style="width:6px;height:6px;background:#52c41a;border-radius:50%;"></div>
+                Agent 已连接
+            </div>
+        </div>
+    </header>
+
+    <!-- ============ 对话区 ============ -->
+    <div class="chat-area" id="chat-area">
+        <div class="chat-container" id="chat-container">
+            <!-- 空状态 -->
+            <div class="empty-state" id="empty-state">
+                <div class="empty-icon">🤖</div>
+                <h2>Agent 模式</h2>
+                <p>输入您的问题，Agent 将自主规划、调用工具并生成回答</p>
+                <p style="font-size:11px;color:#5a5a7a;margin-top:4px;">
+                    <i class="fas fa-robot"></i> DeepSeek-V4-Flash 规划 · 
+                    <i class="fas fa-search"></i> 知识库检索 · 
+                    <i class="fas fa-brain"></i> 智能生成
+                </p>
+            </div>
+            <!-- 对话流消息将动态插入到这里 -->
+            <div id="message-list"></div>
+        </div>
+    </div>
+
+    <!-- ============ 输入区 ============ -->
+    <div class="input-area">
+        <div style="max-width:800px;margin:0 auto 8px;display:flex;align-items:center;justify-content:space-between;">
+            <div style="font-size:11px;color:#5a5a7a;">
+                <i class="fas fa-robot" style="color:#6c63ff;"></i> Agent 模式 · DeepSeek 规划
+            </div>
+            <button class="clear-btn" id="clear-btn" onclick="clearConversation()">
+                <i class="fas fa-trash-alt"></i> 清空对话
+            </button>
+        </div>
+        <div class="input-container">
+            <textarea id="question-input" rows="1" placeholder="输入您的问题，Agent 将自动规划工具调用..." oninput="autoResize(this)"></textarea>
+            <button class="send-btn" id="submit-btn" onclick="submitQuestion()">
+                <i class="fas fa-arrow-up"></i>
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // ============ 全局状态 ============
+        const state = {
+            isLoading: false,
+            apiBaseUrl: window.location.origin,
+        };
+
+        // ============ DOM 引用 ============
+        const el = {
+            questionInput: document.getElementById('question-input'),
+            submitBtn: document.getElementById('submit-btn'),
+            chatArea: document.getElementById('chat-area'),
+            messageList: document.getElementById('message-list'),
+            emptyState: document.getElementById('empty-state'),
+        };
+
+        // ============ 工具函数 ============
+
+        function autoResize(textarea) {
+            textarea.style.height = 'auto';
+            textarea.style.height = Math.min(textarea.scrollHeight, 120) + 'px';
+        }
+
+        function escapeHtml(text) {
+            if (!text) return '';
+            var div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function scrollToBottom() {
+            requestAnimationFrame(function() {
+                el.chatArea.scrollTop = el.chatArea.scrollHeight;
+            });
+        }
+
+        // ============ 对话流渲染 ============
+
+        // 添加用户消息
+        function addUserMessage(text) {
+            var div = document.createElement('div');
+            div.className = 'msg-row msg-row-user';
+            div.innerHTML = '<div class="msg-bubble msg-bubble-user">' + escapeHtml(text) + '</div>';
+            el.messageList.appendChild(div);
+            scrollToBottom();
+        }
+
+        // 添加 AI 消息容器
+        function addAiMessage() {
+            var div = document.createElement('div');
+            div.className = 'msg-row msg-row-ai';
+            div.innerHTML = '<div class="msg-avatar msg-avatar-ai">R</div>' +
+                '<div style="flex:1;min-width:0;">' +
+                '<div class="msg-header"><span class="msg-role-label">Agent</span></div>' +
+                '<div id="ai-msg-body"></div>' +
+                '</div>';
+            el.messageList.appendChild(div);
+            scrollToBottom();
+            return div.querySelector('#ai-msg-body');
+        }
+
+        // 显示"思考中"占位
+        function addThinkingIndicator() {
+            var div = document.createElement('div');
+            div.className = 'msg-row msg-row-ai';
+            div.id = 'thinking-indicator';
+            div.innerHTML = '<div class="msg-avatar msg-avatar-ai">R</div>' +
+                '<div style="flex:1;min-width:0;">' +
+                '<div class="msg-header"><span class="msg-role-label">Agent</span></div>' +
+                '<div class="thinking-dots"><span></span><span></span><span></span></div>' +
+                '</div>';
+            el.messageList.appendChild(div);
+            scrollToBottom();
+        }
+
+        function removeThinkingIndicator() {
+            var ti = document.getElementById('thinking-indicator');
+            if (ti) ti.remove();
+        }
+
+        // ============ Agent Trace 渲染 ============
+
+        /**
+         * 渲染 Agent 思考过程面板
+         * @param {Array} trace - agent_trace 数组
+         * @param {string} status - success/fallback/error
+         * @returns {string} HTML 字符串
+         */
+        function renderAgentTrace(trace, status) {
+            if (!trace || trace.length === 0) return '';
+
+            var html = '<div class="agent-trace-panel">';
+
+            // 折叠面板头部
+            var statusIcon = status === 'success' ? '✅' : (status === 'fallback' ? '⚠️' : '❌');
+            html += '<div class="agent-trace-header" onclick="toggleTrace(this)">' +
+                '<span class="trace-title">' + statusIcon + ' Agent 思考过程（' + trace.length + '步）</span>' +
+                '<span class="trace-toggle open"><i class="fas fa-chevron-up"></i></span>' +
+                '</div>';
+
+            // 折叠面板内容
+            html += '<div class="agent-trace-body" id="agent-trace-body">';
+
+            for (var i = 0; i < trace.length; i++) {
+                var step = trace[i];
+                var stepNum = step.step || (i + 1);
+                var action = step.action || '';
+                var inputData = step.input || {};
+                var outputData = step.output || {};
+
+                // 判断工具类型
+                var actionClass = 'retrieve';
+                var actionIcon = '🔍';
+                if (action.indexOf('generate') >= 0) {
+                    actionClass = 'generate';
+                    actionIcon = '🤖';
+                } else if (action.indexOf('降级') >= 0) {
+                    actionClass = 'fallback';
+                    actionIcon = '⚠️';
+                }
+
+                html += '<div class="trace-step">';
+                html += '<div class="step-header">';
+                html += '<span class="step-number">📋 第 ' + stepNum + '/' + trace.length + ' 步</span>';
+                html += '</div>';
+                html += '<div class="step-action ' + actionClass + '">' + actionIcon + ' ' + escapeHtml(action) + '</div>';
+
+                // 输入参数
+                if (inputData && Object.keys(inputData).length > 0) {
+                    html += '<div class="step-detail">';
+                    html += '<div class="step-detail-label">📝 输入参数</div>';
+                    html += '<div class="step-detail-code">' + escapeHtml(JSON.stringify(inputData, null, 2)) + '</div>';
+                    html += '</div>';
+                }
+
+                // 输出结果
+                if (outputData) {
+                    html += '<div class="step-detail">';
+                    html += '<div class="step-detail-label">📎 工具返回</div>';
+
+                    if (typeof outputData === 'string') {
+                        // 字符串输出
+                        html += '<div class="step-detail-text">' + escapeHtml(outputData) + '</div>';
+                    } else if (outputData.documents) {
+                        // 检索结果
+                        var docCount = outputData.total || outputData.documents.length || 0;
+                        html += '<div class="step-detail-text">找到 ' + docCount + ' 条相关文档片段</div>';
+                        // 显示文档标题列表
+                        if (outputData.documents && outputData.documents.length > 0) {
+                            html += '<div style="margin-top:4px;">';
+                            for (var d = 0; d < Math.min(outputData.documents.length, 3); d++) {
+                                var doc = outputData.documents[d];
+                                var title = doc.title || '未命名';
+                                var score = doc.score || 0;
+                                html += '<div style="font-size:11px;color:#9e9e9e;padding:2px 0;">' +
+                                    '  📄 ' + escapeHtml(title) + ' (score: ' + score.toFixed(2) + ')' +
+                                    '</div>';
+                            }
+                            if (outputData.documents.length > 3) {
+                                html += '<div style="font-size:10px;color:#5a5a7a;">  ... 还有 ' + (outputData.documents.length - 3) + ' 条</div>';
+                            }
+                            html += '</div>';
+                        }
+                    } else if (outputData.answer) {
+                        // 生成结果
+                        var answerPreview = outputData.answer;
+                        if (answerPreview.length > 100) {
+                            answerPreview = answerPreview.substring(0, 100) + '...';
+                        }
+                        html += '<div class="step-detail-text">生成回答完成</div>';
+                        html += '<div class="step-detail-code" style="max-height:60px;">' + escapeHtml(answerPreview) + '</div>';
+                    } else if (outputData.error) {
+                        // 错误
+                        html += '<div class="step-detail-text" style="color:#e74c3c;">❌ ' + escapeHtml(outputData.error) + '</div>';
+                    } else {
+                        // 其他输出
+                        html += '<div class="step-detail-code">' + escapeHtml(JSON.stringify(outputData, null, 2)) + '</div>';
+                    }
+
+                    html += '</div>';
+                }
+
+                // 步骤分隔线
+                if (i < trace.length - 1) {
+                    html += '<hr class="step-divider">';
+                }
+
+                html += '</div>';
+            }
+
+            html += '</div></div>';
+            return html;
+        }
+
+        /**
+         * 切换 Agent Trace 折叠面板
+         */
+        function toggleTrace(headerEl) {
+            var body = headerEl.parentElement.querySelector('.agent-trace-body');
+            var toggle = headerEl.querySelector('.trace-toggle');
+            if (body) {
+                body.classList.toggle('hidden');
+                if (toggle) toggle.classList.toggle('open');
+            }
+        }
+
+        /**
+         * 渲染状态条
+         */
+        function renderStatusBar(status, errorMsg) {
+            if (status === 'success') {
+                return '<div class="status-bar success">' +
+                    '<i class="fas fa-check-circle"></i> Agent 模式 · 已完成规划与工具调用' +
+                    '</div>';
+            } else if (status === 'fallback') {
+                return '<div class="status-bar fallback">' +
+                    '<i class="fas fa-exclamation-triangle"></i> 已降级到基础 RAG 模式 · DeepSeek API 暂时不可用，当前使用本地模型回答' +
+                    '</div>';
+            } else if (status === 'error') {
+                return '<div class="status-bar error">' +
+                    '<i class="fas fa-times-circle"></i> 处理失败' +
+                    (errorMsg ? ' · ' + escapeHtml(errorMsg) : '') +
+                    '</div>';
+            }
+            return '';
+        }
+
+        // ============ 核心问答 ============
+
+        async function submitQuestion() {
+            if (state.isLoading) return;
+
+            var question = el.questionInput.value.trim();
+            if (!question) {
+                el.questionInput.focus();
+                return;
+            }
+
+            // 隐藏空状态
+            el.emptyState.style.display = 'none';
+
+            // 添加用户消息
+            addUserMessage(question);
+            el.questionInput.value = '';
+            autoResize(el.questionInput);
+
+            // 显示思考中
+            addThinkingIndicator();
+
+            state.isLoading = true;
+            el.submitBtn.disabled = true;
+
+            // 移除思考中
+            removeThinkingIndicator();
+
+            // 创建 AI 消息容器
+            var aiBody = addAiMessage();
+
+            try {
+                // 调用 Agent 接口
+                var response = await fetch(state.apiBaseUrl + '/api/agent/ask', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ question: question })
+                });
+
+                var data = await response.json();
+
+                if (!response.ok) {
+                    aiBody.innerHTML = '<div class="status-bar error">' +
+                        '<i class="fas fa-times-circle"></i> 请求失败: ' + escapeHtml(data.detail && data.detail.message || '服务异常') +
+                        '</div>';
+                    return;
+                }
+
+                // 构建消息内容
+                var html = '';
+
+                // 状态条
+                html += renderStatusBar(data.status, data.error);
+
+                // Agent 思考过程
+                if (data.agent_trace && data.agent_trace.length > 0) {
+                    html += renderAgentTrace(data.agent_trace, data.status);
+                }
+
+                // 最终回答
+                if (data.answer) {
+                    html += '<div class="final-answer">';
+                    html += '<div class="final-answer-label"><i class="fas fa-comment-dots" style="color:#6c63ff;"></i> 最终回答</div>';
+                    html += escapeHtml(data.answer);
+                    html += '</div>';
+                }
+
+                aiBody.innerHTML = html;
+                scrollToBottom();
+
+            } catch (error) {
+                console.error('Agent 请求失败:', error);
+                aiBody.innerHTML = '<div class="status-bar error">' +
+                    '<i class="fas fa-times-circle"></i> 请求失败: ' + escapeHtml(error.message) +
+                    '</div>' +
+                    '<div style="margin-top:8px;">' +
+                    '<button class="clear-btn" onclick="submitQuestion()" style="display:inline-flex;">' +
+                    '<i class="fas fa-redo"></i> 重试</button></div>';
+                scrollToBottom();
+            } finally {
+                state.isLoading = false;
+                el.submitBtn.disabled = false;
+            }
+        }
+
+        // ============ 清空对话 ============
+
+        function clearConversation() {
+            if (el.messageList.children.length === 0) return;
+            if (!confirm('确认清空当前对话？')) return;
+            el.messageList.innerHTML = '';
+            el.emptyState.style.display = 'flex';
+            el.questionInput.value = '';
+            autoResize(el.questionInput);
+        }
+
+        // ============ 初始化 ============
+
+        document.addEventListener('DOMContentLoaded', function() {
+            // 回车提交
+            el.questionInput.addEventListener('keydown', function(e) {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();
+                    submitQuestion();
+                }
+            });
+
+            // 聚焦输入框
+            el.questionInput.focus();
+        });
+    </script>
+</body>
+</html>

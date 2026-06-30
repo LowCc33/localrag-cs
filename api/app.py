@@ -226,14 +226,16 @@ app.include_router(agent_routes.router)
 @app.get("/", response_class=HTMLResponse)
 @app.get("/ingest", response_class=HTMLResponse)
 @app.get("/chunks", response_class=HTMLResponse)
+@app.get("/agent", response_class=HTMLResponse)
 async def admin_page(request: Request):
     """
-    后台管理首页 / 知识库管理页面 / Chunk 管理页面
+    后台管理首页 / 知识库管理页面 / Chunk 管理页面 / Agent 对话页面
     返回对应页面的 HTML
     """
     page_map = {
         "/ingest": "ingest.html",
-        "/chunks": "chunks.html"
+        "/chunks": "chunks.html",
+        "/agent": "agent.html",
     }
     page_file = page_map.get(request.url.path, "index.html")
     return templates.TemplateResponse(
