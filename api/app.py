@@ -51,6 +51,7 @@ from dependencies import initialize_clients
 # 导入路由
 from routes import health, ask, cache as cache_route, session as session_route, export as export_route, chunks as chunks_route, public as public_route
 from api import ingest_router
+from api import agent_routes
 
 
 # ============== 应用生命周期管理 ==============
@@ -215,6 +216,9 @@ app.include_router(chunks_route.router)
 
 # 包含公网暴露路由（/api/public/health）
 app.include_router(public_route.router)
+
+# 包含 Agent 路由（/api/agent/ask）
+app.include_router(agent_routes.router)
 
 
 # ============== 页面路由 ==============

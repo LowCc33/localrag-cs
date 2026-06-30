@@ -237,6 +237,25 @@ SUPPORTED_EXTENSIONS = tuple(
     if ext.strip()
 )
 
+# ========== Agent 配置（任务：agent-architecture） ==========
+# -----------------------------------------------------------------------------
+# Agent 模式使用 DeepSeek-V4-Flash API 进行意图理解和工具调用规划
+# 不占本地显存，走火山引擎 API
+# 当 DeepSeek API 不可用时自动降级到原有 RAG 流程
+# -----------------------------------------------------------------------------
+# Agent 开关：True 启用 Agent 模式，False 时 /api/agent/ask 返回 503
+AGENT_ENABLED = os.getenv('AGENT_ENABLED', 'true').lower() == 'true'
+# DeepSeek API Key（优先读环境变量 DEEPSEEK_API_KEY，config.py 里的值作为兜底）
+DEEPSEEK_API_KEY = os.getenv('DEEPSEEK_API_KEY', 'ark-8c848111-eaee-49f1-8d7c-66a2ba64d6f1-b38c9')
+# DeepSeek API 地址（火山引擎）
+DEEPSEEK_API_URL = os.getenv('DEEPSEEK_API_URL', 'https://ark.cn-beijing.volces.com/api/v3/chat/completions')
+# DeepSeek 模型名称
+DEEPSEEK_MODEL = os.getenv('DEEPSEEK_MODEL', 'ep-20260630143620-87j6b')
+# Agent 最大工具调用轮数
+AGENT_MAX_ROUNDS = int(os.getenv('AGENT_MAX_ROUNDS', 3))
+# Agent 单次请求超时（秒）
+AGENT_TIMEOUT = int(os.getenv('AGENT_TIMEOUT', 30))
+
 # ========== 分类/标签管理配置 ==========
 # -----------------------------------------------------------------------------
 # 分类索引名称
