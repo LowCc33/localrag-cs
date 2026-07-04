@@ -8,7 +8,7 @@
 
 # LocalRAG-CS · 企业级本地RAG智能客服
 
-> **纯本地部署 · 零API依赖 · GTX1070 8G可运行**
+> **混合架构 · 标准RAG全本地 + Agent模式(DeepSeek驱动) · GTX1070 8G可运行**
 
 LocalRAG-CS 是一个面向企业客服场景的纯本地智能问答系统。包含**自研Agent规划层**（DeepSeek驱动）、**七级熔断降级**、**三级混合检索**、**Redis缓存加速**、**SSE流式输出**等完整功能。后端+前端约3000行代码，**零重型框架依赖**（无LangChain/LlamaIndex）。
 
@@ -288,9 +288,9 @@ localrag-cs/
 
 ## 📹 演示视频
 
-[![B站演示视频](https://img.shields.io/badge/B站-演示视频-red)](https://www.bilibili.com/video/BV1fCLm6GEZz)
+[![B站演示视频](https://img.shields.io/badge/B站-演示视频-red)](https://www.bilibili.com/video/BV1bCMc63Ewm)
 
-*(视频待更新，展示Agent模式 + 流式输出 + Chunk管理等新功能)*
+完整功能演示（v2版）：Agent规划层 · 七级熔断降级 · 流式输出 · 缓存命中 · 多轮对话 · 知识库管理 · Chunk管理
 
 ---
 
@@ -301,7 +301,7 @@ localrag-cs/
 从跨境电商到全屋定制，再到AI开发，跨界自学成才。坚持全职工作下每天3-4小时学习，完成2个完整AI项目（LocalRAG-CS企业级本地RAG系统 + 铁三角多Agent协同开发框架）。
 
 - GitHub: [LowCc33](https://github.com/LowCc33)
-- 项目演示: [B站](https://www.bilibili.com/video/BV1fCLm6GEZz)
+- 项目演示: [B站](https://www.bilibili.com/video/BV1bCMc63Ewm)
 
 ---
 
