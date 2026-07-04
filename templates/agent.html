@@ -3,9 +3,6 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-    <meta http-equiv="Pragma" content="no-cache">
-    <meta http-equiv="Expires" content="0">
     <title>LocalRAG-CS Agent模式</title>
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
@@ -263,71 +260,10 @@
             color: #b0b0c0;
             padding: 4px 0;
         }
-        /* Agent 推理过程（内心独白） */
-        .trace-step .step-reasoning {
-            background: #1a1a35;
-            border-left: 3px solid #f39c12;
-            border-radius: 4px;
-            padding: 8px 10px;
-            margin: 6px 0;
-        }
-        .trace-step .step-reasoning-label {
-            font-size: 11px;
-            color: #f39c12;
-            margin-bottom: 4px;
-            font-weight: 600;
-        }
-        .trace-step .step-reasoning-text {
-            font-size: 12px;
-            color: #b0b0c0;
-            line-height: 1.6;
-            white-space: pre-wrap;
-            word-break: break-word;
-        }
         .trace-step .step-divider {
             border: none;
             border-top: 1px dashed #2a2a4a;
             margin: 8px 0;
-        }
-
-        /* 流式思考气泡 */
-        .reasoning-bubble {
-            background: #1a1a35;
-            border-left: 3px solid #f39c12;
-            border-radius: 4px;
-            padding: 6px 10px;
-            margin: 4px 0;
-            animation: reasoningFadeIn 0.3s ease;
-        }
-        @keyframes reasoningFadeIn {
-            from { opacity: 0; transform: translateY(-4px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        /* 流式回答 */
-        .streaming-answer {
-            margin-top: 12px;
-            padding: 12px;
-            background: #1e1e30;
-            border-radius: 8px;
-            border: 1px solid #2a2a4a;
-        }
-        .streaming-answer-text {
-            font-size: 14px;
-            color: #e0e0e0;
-            line-height: 1.7;
-            white-space: pre-wrap;
-            word-break: break-word;
-            min-height: 20px;
-        }
-        .streaming-cursor {
-            display: inline-block;
-            color: #6c63ff;
-            font-weight: bold;
-            animation: cursorBlink 0.8s step-end infinite;
-        }
-        @keyframes cursorBlink {
-            50% { opacity: 0; }
         }
 
         /* ============ 状态条 ============ */
@@ -722,11 +658,11 @@
                 html += '<span class="step-number">📋 第 ' + stepNum + '/' + trace.length + ' 步</span>';
                 html += '</div>';
 
-                // 推理过程（内心独白）
-                if (step.reasoning) {
-                    html += '<div class="step-reasoning">';
-                    html += '<div class="step-reasoning-label">💭 思考</div>';
-                    html += '<div class="step-reasoning-text">' + escapeHtml(step.reasoning) + '</div>';
+                // 思考过程（自言自语）
+                if (step.reasoning && step.reasoning.trim()) {
+                    html += '<div style="margin-bottom:6px;">';
+                    html += '<div class="step-detail-label">💭 思考</div>';
+                    html += '<div class="step-detail-text" style="color:#b0b0d0;font-style:italic;">' + escapeHtml(step.reasoning) + '</div>';
                     html += '</div>';
                 }
 
@@ -843,273 +779,78 @@
                 return;
             }
 
+            // 隐藏空状态
             el.emptyState.style.display = 'none';
+
+            // 添加用户消息
             addUserMessage(question);
             el.questionInput.value = '';
             autoResize(el.questionInput);
+
+            // 显示思考中
             addThinkingIndicator();
 
             state.isLoading = true;
             el.submitBtn.disabled = true;
 
+            // 移除思考中
             removeThinkingIndicator();
+
+            // 创建 AI 消息容器
             var aiBody = addAiMessage();
 
-            var traceSteps = [];
-            var finalStatus = '';
-            var answerText = '';
-            var reasoningDiv = null;
-            var traceDiv = null;
-            var answerDiv = null;
-
             try {
-                var response = await fetch(state.apiBaseUrl + '/api/agent/ask/stream', {
+                // 调用 Agent 接口
+                var response = await fetch(state.apiBaseUrl + '/api/agent/ask', {
                     method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Accept': 'text/event-stream'
-                    },
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ question: question })
                 });
 
+                var data = await response.json();
+
                 if (!response.ok) {
-                    console.warn('流式接口异常，降级到非流式 /api/agent/ask');
-                    await fallbackToNonStream(question, aiBody);
+                    aiBody.innerHTML = '<div class="status-bar error">' +
+                        '<i class="fas fa-times-circle"></i> 请求失败: ' + escapeHtml(data.detail && data.detail.message || '服务异常') +
+                        '</div>';
                     return;
                 }
 
-                var reader = response.body.getReader();
-                var decoder = new TextDecoder('utf-8');
-                var buffer = '';
+                // 构建消息内容
+                var html = '';
 
-                while (true) {
-                    var result = await reader.read();
-                    if (result.done) break;
-                    buffer += decoder.decode(result.value, { stream: true });
+                // 状态条
+                html += renderStatusBar(data.status, data.error);
 
-                    var sepIdx;
-                    while ((sepIdx = buffer.indexOf('\n\n')) >= 0) {
-                        var rawEvent = buffer.slice(0, sepIdx);
-                        buffer = buffer.slice(sepIdx + 2);
-                        handleSseEvent(rawEvent);
-                    }
+                // Agent 思考过程
+                if (data.agent_trace && data.agent_trace.length > 0) {
+                    html += renderAgentTrace(data.agent_trace, data.status);
                 }
 
-                renderFinalResult();
+                // 最终回答
+                if (data.answer) {
+                    html += '<div class="final-answer">';
+                    html += '<div class="final-answer-label"><i class="fas fa-comment-dots" style="color:#6c63ff;"></i> 最终回答</div>';
+                    html += escapeHtml(data.answer);
+                    html += '</div>';
+                }
+
+                aiBody.innerHTML = html;
+                scrollToBottom();
 
             } catch (error) {
-                console.error('Agent 流式请求失败:', error);
-                try {
-                    await fallbackToNonStream(question, aiBody);
-                } catch (e2) {
-                    aiBody.innerHTML = '<div class="status-bar error">' +
-                        '<i class="fas fa-times-circle"></i> 请求失败: ' + escapeHtml(error.message) +
-                        '</div>' +
-                        '<div style="margin-top:8px;">' +
-                        '<button class="clear-btn" onclick="submitQuestion()" style="display:inline-flex;">' +
-                        '<i class="fas fa-redo"></i> 重试</button></div>';
-                    scrollToBottom();
-                }
+                console.error('Agent 请求失败:', error);
+                aiBody.innerHTML = '<div class="status-bar error">' +
+                    '<i class="fas fa-times-circle"></i> 请求失败: ' + escapeHtml(error.message) +
+                    '</div>' +
+                    '<div style="margin-top:8px;">' +
+                    '<button class="clear-btn" onclick="submitQuestion()" style="display:inline-flex;">' +
+                    '<i class="fas fa-redo"></i> 重试</button></div>';
+                scrollToBottom();
             } finally {
                 state.isLoading = false;
                 el.submitBtn.disabled = false;
             }
-
-            function handleSseEvent(raw) {
-                var lines = raw.split('\n');
-                var eventName = 'message';
-                var dataStr = '';
-                for (var li = 0; li < lines.length; li++) {
-                    var line = lines[li];
-                    if (line.startsWith('event:')) {
-                        eventName = line.slice(6).trim();
-                    } else if (line.startsWith('data:')) {
-                        dataStr += line.slice(5).trim();
-                    }
-                }
-                if (!dataStr) return;
-
-                var data;
-                try {
-                    data = JSON.parse(dataStr);
-                } catch (e) {
-                    return;
-                }
-
-                switch (eventName) {
-                    case 'reasoning':
-                        appendReasoning(data.text || '');
-                        break;
-                    case 'trace_step':
-                        if (data.step) {
-                            traceSteps.push(data.step);
-                            appendTraceStep(data.step);
-                        }
-                        break;
-                    case 'token':
-                        answerText += data.text || '';
-                        updateAnswerText(answerText);
-                        break;
-                    case 'done':
-                        finalStatus = data.status || 'success';
-                        if (data.trace && data.trace.length > 0) {
-                            traceSteps = data.trace;
-                        }
-                        break;
-                    case 'error':
-                        appendError(data.message || '');
-                        break;
-                }
-            }
-
-            function appendReasoning(text) {
-                if (!reasoningDiv) {
-                    reasoningDiv = document.createElement('div');
-                    aiBody.appendChild(reasoningDiv);
-                }
-                var bubble = document.createElement('div');
-                bubble.className = 'reasoning-bubble';
-                bubble.innerHTML = '<span style="color:#f39c12;">💭</span> ' +
-                    '<span style="color:#b0b0d0;font-style:italic;font-size:13px;">' +
-                    escapeHtml(text) + '</span>';
-                reasoningDiv.appendChild(bubble);
-                scrollToBottom();
-            }
-
-            function appendTraceStep(step) {
-                if (!traceDiv) {
-                    traceDiv = document.createElement('div');
-                    traceDiv.className = 'trace-steps-container';
-                    aiBody.appendChild(traceDiv);
-                }
-                var stepNum = step.step || (traceSteps.length);
-                var action = step.action || '';
-                var inputData = step.input || {};
-                var outputData = step.output || {};
-
-                var actionClass = 'retrieve';
-                var actionIcon = '🔍';
-                if (action.indexOf('generate') >= 0) {
-                    actionClass = 'generate';
-                    actionIcon = '🤖';
-                } else if (action.indexOf('降级') >= 0) {
-                    actionClass = 'fallback';
-                    actionIcon = '⚠️';
-                }
-
-                var html = '<div class="trace-step" style="margin-bottom:8px;">';
-                html += '<div class="step-header">';
-                html += '<span class="step-number">📋 第 ' + stepNum + '/' + '?' + ' 步</span>';
-                html += '</div>';
-
-                // 推理过程
-                if (step.reasoning) {
-                    html += '<div class="step-reasoning">';
-                    html += '<div class="step-reasoning-label">💭 思考</div>';
-                    html += '<div class="step-reasoning-text">' + escapeHtml(step.reasoning) + '</div>';
-                    html += '</div>';
-                }
-
-                html += '<div class="step-action ' + actionClass + '">' + actionIcon + ' ' + escapeHtml(action) + '</div>';
-
-                if (inputData && Object.keys(inputData).length > 0) {
-                    html += '<div class="step-detail">';
-                    html += '<div class="step-detail-label">📝 输入参数</div>';
-                    html += '<div class="step-detail-code">' + escapeHtml(JSON.stringify(inputData, null, 2)) + '</div>';
-                    html += '</div>';
-                }
-
-                if (outputData) {
-                    html += '<div class="step-detail">';
-                    html += '<div class="step-detail-label">📎 工具返回</div>';
-                    var outputStr = typeof outputData === 'string' ? outputData : JSON.stringify(outputData, null, 2);
-                    if (outputStr.length > 300) outputStr = outputStr.slice(0, 300) + '...';
-                    html += '<div class="step-detail-code">' + escapeHtml(outputStr) + '</div>';
-                    html += '</div>';
-                }
-
-                html += '</div>';
-
-                var div = document.createElement('div');
-                div.innerHTML = html;
-                traceDiv.appendChild(div.firstChild);
-                scrollToBottom();
-            }
-
-            function updateAnswerText(text) {
-                if (!answerDiv) {
-                    answerDiv = document.createElement('div');
-                    answerDiv.className = 'streaming-answer';
-                    answerDiv.innerHTML = '<div class="final-answer-label"><i class="fas fa-comment-dots" style="color:#6c63ff;"></i> 最终回答</div>' +
-                        '<div class="streaming-answer-text"></div>';
-                    aiBody.appendChild(answerDiv);
-                }
-                var textDiv = answerDiv.querySelector('.streaming-answer-text');
-                textDiv.textContent = text;
-                // 末尾加闪烁光标
-                var cursor = answerDiv.querySelector('.streaming-cursor');
-                if (!cursor) {
-                    cursor = document.createElement('span');
-                    cursor.className = 'streaming-cursor';
-                    cursor.textContent = '|';
-                    textDiv.appendChild(cursor);
-                }
-                scrollToBottom();
-            }
-
-            function appendError(msg) {
-                var errDiv = document.createElement('div');
-                errDiv.className = 'status-bar error';
-                errDiv.innerHTML = '<i class="fas fa-times-circle"></i> ' + escapeHtml(msg);
-                aiBody.appendChild(errDiv);
-                scrollToBottom();
-            }
-
-            function renderFinalResult() {
-                // 更新所有 step-number 里的总数
-                var total = traceSteps.length;
-                var stepLabels = aiBody.querySelectorAll('.step-number');
-                for (var i = 0; i < stepLabels.length; i++) {
-                    var txt = stepLabels[i].textContent;
-                    stepLabels[i].textContent = txt.replace('/?', '/' + total);
-                }
-                // 去掉回答区域的光标
-                if (answerDiv) {
-                    var cursor = answerDiv.querySelector('.streaming-cursor');
-                    if (cursor) cursor.remove();
-                    var label = answerDiv.querySelector('.final-answer-label');
-                    if (label) {
-                        label.innerHTML = '<i class="fas fa-comment-dots" style="color:#6c63ff;"></i> 📝 回答';
-                    }
-                }
-                scrollToBottom();
-            }
-        }
-
-        // 降级到非流式
-        async function fallbackToNonStream(question, aiBody) {
-            var response = await fetch(state.apiBaseUrl + '/api/agent/ask', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question: question })
-            });
-            var data = await response.json();
-            if (!response.ok) {
-                throw new Error(data.detail && data.detail.message || '请求失败: ' + response.status);
-            }
-            var html = '';
-            html += renderStatusBar(data.status, data.error);
-            if (data.agent_trace && data.agent_trace.length > 0) {
-                html += renderAgentTrace(data.agent_trace, data.status);
-            }
-            if (data.answer) {
-                html += '<div class="final-answer">';
-                html += '<div class="final-answer-label"><i class="fas fa-comment-dots" style="color:#6c63ff;"></i> 最终回答</div>';
-                html += escapeHtml(data.answer);
-                html += '</div>';
-            }
-            aiBody.innerHTML = html;
-            scrollToBottom();
         }
 
         // ============ 清空对话 ============
