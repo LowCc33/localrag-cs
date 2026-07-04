@@ -941,7 +941,7 @@
                 '<div class="msg-header"><span class="msg-role-label">LocalRAG</span></div>' +
                 '<div class="msg-bubble msg-bubble-ai" id="ai-msg-content"></div>' +
                 '<div class="answer-footer" id="ai-msg-footer"></div>' +
-                '<div class="sources-panel hidden" id="ai-msg-sources"></div>' +
+                '<div id="ai-msg-sources"></div>'
                 '</div>';
             el.messageList.appendChild(div);
             scrollToBottom();
@@ -1151,23 +1151,46 @@
         // ============ 渲染函数 ============
 
         // 来源（折叠面板）
+        function toggleSources(btnId, panelId) {
+            var panel = document.getElementById(panelId);
+            var btn = document.getElementById(btnId);
+            if (!panel || !btn) return;
+            var isHidden = panel.classList.contains('hidden');
+            if (isHidden) {
+                panel.classList.remove('hidden');
+                btn.innerHTML = btn.innerHTML.replace('▶', '▼');
+            } else {
+                panel.classList.add('hidden');
+                btn.innerHTML = btn.innerHTML.replace('▼', '▶');
+            }
+        }
+
         function renderSourcesInline(sources, sourcesEl) {
             if (!sources || sources.length === 0) {
                 sourcesEl.classList.add('hidden');
                 return;
             }
+            var uid = 'sources-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6);
+            var btnId = uid + '-btn';
+            var panelId = uid + '-panel';
+
             var html = '';
+            html += '<button id="' + btnId + '" class="source-toggle-btn" onclick="toggleSources(\'' + btnId + '\', \'' + panelId + '\')">' +
+                '<span>▶</span> 检索来源 (' + sources.length + ')</button>';
+            html += '<div id="' + panelId + '" class="sources-panel hidden">';
             for (var i = 0; i < sources.length; i++) {
                 var doc = sources[i];
                 var bm25Score = doc.bm25_score !== undefined ? doc.bm25_score : (doc.es_score || 0);
                 var vectorScore = doc.vector_score !== undefined ? doc.vector_score : 0;
+                var contentSnippet = (doc.content || '').slice(0, 200);
                 html += '<div class="source-item">' +
                     '<div class="source-title">#' + (i + 1) + ' ' + escapeHtml(doc.title || '未命名文档') + '</div>' +
-                    '<div class="source-content">' + escapeHtml(doc.content || '') + '</div>' +
+                    '<div class="source-content">' + escapeHtml(contentSnippet) + '</div>' +
                     '<div class="source-score">BM25: ' + bm25Score.toFixed(1) + ' | 向量: ' + vectorScore.toFixed(2) +
                     (doc.source_file ? ' | ' + escapeHtml(doc.source_file) : '') + '</div>' +
                     '</div>';
             }
+            html += '</div>';
             sourcesEl.innerHTML = html;
         }
 

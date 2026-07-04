@@ -167,3 +167,18 @@ class DeepSeekClient:
             文本内容字符串
         """
         return message.get("content", "") or ""
+
+    def get_reasoning(self, message: Dict[str, Any]) -> str:
+        """
+        从 DeepSeek 返回的消息中提取推理过程（reasoning_content）
+
+        DeepSeek-V4-Flash 在 function calling 时会返回 reasoning_content 字段，
+        内容是模型的内心独白/思考过程。提取出来展示给用户，让 Agent 的决策过程透明化。
+
+        Args:
+            message: API 返回的 message 字典
+
+        Returns:
+            推理过程文本，如果没有则返回空字符串
+        """
+        return message.get("reasoning_content", "") or ""

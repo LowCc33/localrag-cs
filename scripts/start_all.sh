@@ -67,10 +67,10 @@ wait_for_service "Embedding服务" "http://localhost:8081/health" 30
 echo ""
 
 # 第三步：启动Reranker重排模型
-echo "【3/5】启动Reranker重排模型（端口8082, CPU模式）..."
+echo "【3/5】启动Reranker重排模型（端口8082, GPU模式）..."
 $LLAMA_SERVER \
   -m $MODEL_BASE/Qwen3-Reranker-0.6B-GGUF/Qwen3-Reranker-0.6B-q8_0.gguf \
-  --port 8082 --reranking --n-gpu-layers 0 -c 768 -b 768 -ub 512 --fit off \
+  --port 8082 --reranking --n-gpu-layers 99 -c 768 -b 768 -ub 512 --fit off \
   > /tmp/llama_rerank.log 2>&1 &
 RERANK_PID=$!
 echo "  ✅ Reranker进程已创建（PID: $RERANK_PID）"

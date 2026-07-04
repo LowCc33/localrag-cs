@@ -242,7 +242,21 @@ async def admin_page(request: Request):
         request=request,
         name=page_file,
         context={
-            "api_base_url": "/api"
+            "api_base_url": "/api",
+            "cache_buster": int(time.time()),
+        }
+    )
+
+
+@app.get("/agent-v{version}")
+async def agent_page_v(request: Request, version: str):
+    """带版本号的 Agent 页面，绕过浏览器缓存"""
+    return templates.TemplateResponse(
+        request=request,
+        name="agent.html",
+        context={
+            "api_base_url": "/api",
+            "cache_buster": int(time.time()),
         }
     )
 

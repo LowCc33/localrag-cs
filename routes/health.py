@@ -121,13 +121,16 @@ def _test_client_connection(client_name: str, client: object):
         Exception: 连接测试失败时抛出异常
     """
     if client_name == 'es':
-        # 测试 ES 连接
-        if hasattr(client, 'ping'):
-            if not client.ping():
-                raise Exception("ES ping 失败")
-        elif hasattr(client, 'client') and hasattr(client.client, 'ping'):
-            if not client.client.ping():
-                raise Exception("ES ping 失败")
+        # 测试 ES 连接（短超时2秒，不阻塞健康检查）
+        if hasattr(client, 'client') and hasattr(client.client, 'ping'):
+            import elasticsearch
+            old_timeout = client.client.transport.request_timeout
+            try:
+                client.client.transport.request_timeout = 2
+                if not client.client.ping():
+                    raise Exception("ES ping 失败")
+            finally:
+                client.client.transport.request_timeout = old_timeout
     
     elif client_name == 'encoder':
         # 测试 Embedding 编码器
