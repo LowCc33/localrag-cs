@@ -62,3 +62,8 @@ test_*.py
 *.jsonl
 *.parquet
 *.feather
+
+# 数据库文件
+*.db
+*.sqlite
+*.sqlite3
