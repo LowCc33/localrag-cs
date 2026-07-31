@@ -8,7 +8,13 @@ echo "========================================"
 echo ""
 
 # 默认配置
-ES_HOST="https://192.168.1.3:9200"
+# 自动探测 WSL2 网关 IP（Windows 主机地址），没探测到再用 127.0.0.1 兜底
+GATEWAY_IP=$(ip route show default 2>/dev/null | awk '{print $3}')
+if [ -n "$GATEWAY_IP" ]; then
+    ES_HOST="https://${GATEWAY_IP}:9200"
+else
+    ES_HOST="https://127.0.0.1:9200"
+fi
 LLM_URL="http://localhost:8080"
 EMBEDDING_URL="http://localhost:8081"
 RERANKER_URL="http://localhost:8082"
