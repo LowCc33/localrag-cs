@@ -30,7 +30,27 @@ DEBUG = ENV == 'development'
 #
 # 查看当前 WSL2 网关: ip route | grep default
 # -----------------------------------------------------------------------------
-ES_HOST = os.getenv('ES_HOST', 'https://192.168.1.3:9200')
+ES_HOST = os.getenv('ES_HOST', '')
+
+# 如果没有设置 ES_HOST 环境变量，自动探测 WSL2 网关 IP（Windows 主机地址）
+# 这样 WSL 重启 IP 变了也不用手动改
+if not ES_HOST:
+    try:
+        import subprocess
+        result = subprocess.run(
+            ['ip', 'route', 'show', 'default'],
+            capture_output=True, text=True, timeout=2
+        )
+        if result.returncode == 0:
+            gateway_ip = result.stdout.strip().split()[2]
+            ES_HOST = f'https://{gateway_ip}:9200'
+            print(f'[config] 自动检测WSL网关IP: {gateway_ip} → ES_HOST={ES_HOST}')
+        else:
+            ES_HOST = 'https://127.0.0.1:9200'
+            print(f'[config] 检测网关失败，使用默认 ES_HOST={ES_HOST}')
+    except Exception as e:
+        ES_HOST = 'https://127.0.0.1:9200'
+        print(f'[config] 检测网关异常: {e}，使用默认 ES_HOST={ES_HOST}')
 ES_USER = os.getenv('ES_USER', 'elastic')
 ES_PASSWORD = os.getenv('ES_PASSWORD', 'Xw5sMLBqQuJfowJe8T*q')  # 请修改为实际密码
 ES_TIMEOUT = int(os.getenv('ES_TIMEOUT', 30))
