@@ -28,13 +28,13 @@ TOOLS_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "retrieve_knowledge",
-            "description": "从知识库检索与用户问题相关的文档片段",
+            "description": "从知识库检索与用户问题相关的文档片段。注意：如果原始问题包含代词，请传入已改写（代词替换为具体名词）后的问题",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {
                         "type": "string",
-                        "description": "检索关键词"
+                        "description": "检索关键词（如果原始问题包含代词，这里传改写后的问题）"
                     },
                     "top_k": {
                         "type": "integer",

@@ -56,7 +56,7 @@ class AskRequest(BaseModel):
         description="混合检索召回数量"
     )
     rerank_top_k: int = Field(
-        default=3,
+        default=5,
         ge=1,
         le=10,
         description="重排后返回的文档数量"

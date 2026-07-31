@@ -47,7 +47,7 @@ wait_for_service() {
 # 第一步：启动LLM生成模型（最重要，先启动确保显存）
 echo "【1/5】启动LLM生成模型（端口8080, GPU模式）..."
 $LLAMA_SERVER \
-  -m $MODEL_BASE/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct-Q3_K_M.gguf \
+  -m $MODEL_BASE/Qwen2.5-7B-Instruct-GGUF/qwen2.5-7b-instruct-q3_k_m.gguf \
   --port 8080 -c 2048 -b 256 --n-gpu-layers 99 --fit off \
   > /tmp/llama_gen.log 2>&1 &
 LLM_PID=$!

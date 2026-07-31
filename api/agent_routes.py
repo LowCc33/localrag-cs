@@ -35,6 +35,7 @@ router = APIRouter(tags=["agent"])
 class AgentAskRequest(BaseModel):
     """Agent 问答接口请求体"""
     question: str = Field(..., description="用户问题", min_length=1, max_length=1000)
+    session_id: Optional[str] = Field(None, description="会话ID，用于传递对话历史")
     kb_id: Optional[str] = Field(None, description="知识库ID（可选，当前版本暂未使用）")
 
 
@@ -63,8 +64,19 @@ async def agent_ask(request: AgentAskRequest):
         )
 
     try:
+        # 加载会话历史（用于代词消解）
+        history = None
+        if request.session_id:
+            try:
+                from session_manager import session_manager
+                history = session_manager.get_history(request.session_id, limit=16)
+                if history:
+                    logger.info(f"Agent加载会话历史: {len(history)}条")
+            except Exception as e:
+                logger.warning(f"Agent加载会话历史失败: {e}")
+
         agent = Agent()
-        result = agent.run(request.question.strip())
+        result = agent.run(request.question.strip(), history=history)
 
         response = {
             "answer": result.get("answer", ""),
@@ -112,8 +124,17 @@ async def agent_ask_stream(request: AgentAskRequest):
 
     async def event_generator():
         try:
+            # 加载会话历史（用于代词消解）
+            history = None
+            if request.session_id:
+                try:
+                    from session_manager import session_manager
+                    history = session_manager.get_history(request.session_id, limit=16)
+                except Exception:
+                    pass
+
             agent = Agent()
-            sync_gen = agent.run_stream(request.question.strip())
+            sync_gen = agent.run_stream(request.question.strip(), history=history)
 
             loop = asyncio.get_event_loop()
             sentinel = object()

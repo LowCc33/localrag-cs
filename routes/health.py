@@ -123,7 +123,6 @@ def _test_client_connection(client_name: str, client: object):
     if client_name == 'es':
         # 测试 ES 连接（短超时2秒，不阻塞健康检查）
         if hasattr(client, 'client') and hasattr(client.client, 'ping'):
-            import elasticsearch
             old_timeout = client.client.transport.request_timeout
             try:
                 client.client.transport.request_timeout = 2
