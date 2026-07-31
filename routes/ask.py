@@ -254,8 +254,13 @@ async def ask_endpoint(
                 f"{doc.get('answer', '')}"
             )
         
-        # 组合上下文
-        context = "\n\n".join(context_docs)
+        # 组合上下文（包含对话历史 + 检索文档）
+        context_parts = []
+        if session_context:
+            context_parts.append(f"对话历史：\n{session_context}")
+        if context_docs:
+            context_parts.append("参考资料：\n" + "\n\n".join(context_docs))
+        context = "\n\n".join(context_parts)
         
         # 调用LLM生成答案（context和query分开传）
         answer = llm.generate(context=context, query=request.question)
@@ -551,7 +556,13 @@ async def ask_stream_endpoint(
         context_docs.append(
             f"【文档: {doc.get('question', '未知标题')}】\n{doc.get('answer', '')}"
         )
-    context = "\n\n".join(context_docs)
+    # 组合上下文（包含对话历史 + 检索文档）
+    context_parts = []
+    if session_context:
+        context_parts.append(f"对话历史：\n{session_context}")
+    if context_docs:
+        context_parts.append("参考资料：\n" + "\n\n".join(context_docs))
+    context = "\n\n".join(context_parts)
 
     # ---------- 阶段3：流式 LLM 生成 ----------
     # 注意：llm.generate_stream 是同步生成器，我们在 async generator 里用 to_thread
