@@ -49,7 +49,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from dependencies import initialize_clients
 
 # 导入路由
-from routes import health, ask, cache as cache_route, session as session_route, export as export_route, chunks as chunks_route, public as public_route
+from routes import health, ask, cache as cache_route, session as session_route, export as export_route, chunks as chunks_route, public as public_route, customer_routes
 from api import ingest_router
 from api import agent_routes
 
@@ -220,6 +220,9 @@ app.include_router(public_route.router)
 # 包含 Agent 路由（/api/agent/ask）
 app.include_router(agent_routes.router)
 
+# 包含全屋定制客服路由（/api/customer/ask 等）
+app.include_router(customer_routes.router, prefix="/api/customer")
+
 
 # ============== 页面路由 ==============
 
@@ -227,15 +230,17 @@ app.include_router(agent_routes.router)
 @app.get("/ingest", response_class=HTMLResponse)
 @app.get("/chunks", response_class=HTMLResponse)
 @app.get("/agent", response_class=HTMLResponse)
+@app.get("/customer", response_class=HTMLResponse)
 async def admin_page(request: Request):
     """
-    后台管理首页 / 知识库管理页面 / Chunk 管理页面 / Agent 对话页面
+    后台管理首页 / 知识库管理页面 / Chunk 管理页面 / Agent 对话页面 / 客服页面
     返回对应页面的 HTML
     """
     page_map = {
         "/ingest": "ingest.html",
         "/chunks": "chunks.html",
         "/agent": "agent.html",
+        "/customer": "customer.html",
     }
     page_file = page_map.get(request.url.path, "index.html")
     return templates.TemplateResponse(

@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>全屋定制AI咨询</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ============ 全局 ============ */
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4a4a6c; }
+
+        /* ============ 顶栏 ============ */
+        .topbar {
+            background: linear-gradient(135deg, #2d2d4a, #1e1e2e);
+            border-bottom: 1px solid #2a2a4a;
+            padding: 0 20px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+        .topbar-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .topbar-logo .logo-icon {
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, #6c63ff, #9b7eff);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: #fff;
+            box-shadow: 0 2px 10px rgba(108, 99, 255, 0.3);
+        }
+        .topbar-logo .logo-text {
+            font-size: 17px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 0.5px;
+        }
+        .topbar-logo .logo-sub {
+            font-size: 12px;
+            color: #9a9ac5;
+            margin-top: 2px;
+        }
+        .topbar-right {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .online-dot {
+            width: 8px;
+            height: 8px;
+            background: #4ade80;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .online-text {
+            font-size: 12px;
+            color: #9a9ac5;
+        }
+
+        /* ============ 主内容区 ============ */
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* ============ 聊天区 ============ */
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px 0;
+            display: flex;
+            flex-direction: column;
+        }
+        .chat-area::-webkit-scrollbar { width: 6px; }
+        .chat-area::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 3px; }
+
+        .chat-container {
+            max-width: 800px;
+            width: 100%;
+            margin: 0 auto;
+            padding: 0 20px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ============ 消息 ============ */
+        .msg-row {
+            display: flex;
+            margin-bottom: 20px;
+            animation: fadeIn 0.3s ease;
+        }
+        .msg-row-user { justify-content: flex-end; }
+        .msg-row-ai { justify-content: flex-start; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .msg-avatar {
+            width: 36px;
+            height: 36px;
+            border-radius: 50%;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 16px;
+        }
+        .msg-row-user .msg-avatar {
+            margin-left: 10px;
+            background: linear-gradient(135deg, #6c63ff, #7c6fff);
+            color: #fff;
+            order: 2;
+        }
+        .msg-row-ai .msg-avatar {
+            margin-right: 10px;
+            background: linear-gradient(135deg, #ec4899, #f472b6);
+            color: #fff;
+        }
+
+        .msg-bubble {
+            max-width: 70%;
+            padding: 12px 16px;
+            border-radius: 18px;
+            line-height: 1.6;
+            font-size: 15px;
+            word-wrap: break-word;
+            white-space: pre-wrap;
+        }
+        .msg-row-user .msg-bubble {
+            background: linear-gradient(135deg, #6c63ff, #7c6fff);
+            color: #fff;
+            border-bottom-right-radius: 4px;
+            order: 1;
+        }
+        .msg-row-ai .msg-bubble {
+            background: #2a2a4a;
+            color: #e0e0e0;
+            border-bottom-left-radius: 4px;
+        }
+
+        .msg-footer {
+            font-size: 11px;
+            color: #6a6a8a;
+            margin-top: 4px;
+        }
+        .msg-row-user .msg-footer { text-align: right; }
+
+        /* 打字光标 */
+        .typing-cursor {
+            display: inline-block;
+            width: 2px;
+            height: 16px;
+            background: #9a9ac5;
+            margin-left: 2px;
+            animation: blink 1s infinite;
+            vertical-align: text-bottom;
+        }
+        @keyframes blink {
+            0%, 50% { opacity: 1; }
+            51%, 100% { opacity: 0; }
+        }
+
+        /* ============ 快捷问题区 ============ */
+        .quick-questions {
+            padding: 12px 20px;
+            border-top: 1px solid #2a2a4a;
+            background: #1e1e2e;
+            display: flex;
+            gap: 10px;
+            overflow-x: auto;
+            flex-shrink: 0;
+            -webkit-overflow-scrolling: touch;
+        }
+        .quick-questions::-webkit-scrollbar { height: 4px; }
+        .quick-questions::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 2px; }
+
+        .quick-btn {
+            flex-shrink: 0;
+            padding: 8px 16px;
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 20px;
+            color: #b0b0d0;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        .quick-btn:hover {
+            background: #3a3a5c;
+            border-color: #6c63ff;
+            color: #fff;
+        }
+        .quick-btn:active {
+            transform: scale(0.97);
+        }
+
+        /* ============ 输入区 ============ */
+        .input-area {
+            background: #1e1e2e;
+            border-top: 1px solid #2a2a4a;
+            padding: 12px 20px 20px;
+            flex-shrink: 0;
+        }
+        .input-container {
+            max-width: 800px;
+            margin: 0 auto;
+            display: flex;
+            gap: 10px;
+            align-items: flex-end;
+        }
+        .input-box {
+            flex: 1;
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            border-radius: 12px;
+            padding: 12px 16px;
+            color: #e0e0e0;
+            font-size: 15px;
+            outline: none;
+            resize: none;
+            max-height: 120px;
+            min-height: 44px;
+            line-height: 1.5;
+            transition: border-color 0.2s;
+            font-family: inherit;
+        }
+        .input-box:focus {
+            border-color: #6c63ff;
+        }
+        .input-box::placeholder {
+            color: #6a6a8a;
+        }
+        .send-btn {
+            width: 44px;
+            height: 44px;
+            background: linear-gradient(135deg, #6c63ff, #7c6fff);
+            border: none;
+            border-radius: 12px;
+            color: #fff;
+            font-size: 16px;
+            cursor: pointer;
+            transition: all 0.2s;
+            flex-shrink: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .send-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(108, 99, 255, 0.4);
+        }
+        .send-btn:active {
+            transform: scale(0.95);
+        }
+        .send-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .input-hint {
+            max-width: 800px;
+            margin: 8px auto 0;
+            font-size: 11px;
+            color: #6a6a8a;
+            text-align: center;
+        }
+
+        /* ============ 欢迎卡片 ============ */
+        .welcome-card {
+            background: linear-gradient(135deg, #2a2a4a, #1e1e2e);
+            border: 1px solid #3a3a5c;
+            border-radius: 16px;
+            padding: 30px;
+            text-align: center;
+            margin: 40px auto 20px;
+            max-width: 500px;
+        }
+        .welcome-icon {
+            width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #ec4899, #f472b6);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 28px;
+            color: #fff;
+            margin: 0 auto 16px;
+        }
+        .welcome-title {
+            font-size: 20px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 8px;
+        }
+        .welcome-subtitle {
+            font-size: 14px;
+            color: #9a9ac5;
+            line-height: 1.6;
+        }
+        .welcome-tips {
+            margin-top: 20px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            justify-content: center;
+        }
+        .welcome-tip {
+            padding: 6px 12px;
+            background: #3a3a5c;
+            border-radius: 12px;
+            font-size: 12px;
+            color: #b0b0d0;
+        }
+
+        /* ============ 响应式 ============ */
+        @media (max-width: 640px) {
+            .topbar { height: 52px; padding: 0 15px; }
+            .topbar-logo .logo-text { font-size: 15px; }
+            .topbar-logo .logo-sub { display: none; }
+            .chat-container { padding: 0 15px; }
+            .msg-bubble { max-width: 80%; font-size: 14px; padding: 10px 14px; }
+            .msg-avatar { width: 32px; height: 32px; font-size: 14px; }
+            .input-area { padding: 10px 15px 15px; }
+            .input-box { font-size: 14px; padding: 10px 14px; }
+            .quick-questions { padding: 10px 15px; }
+            .quick-btn { font-size: 12px; padding: 6px 14px; }
+            .welcome-card { padding: 20px; margin: 20px 15px; }
+        }
+    </style>
+</head>
+<body>
+    <!-- ============ 顶栏 ============ -->
+    <header class="topbar">
+        <div class="topbar-logo">
+            <div class="logo-icon">
+                <i class="fas fa-home"></i>
+            </div>
+            <div>
+                <div class="logo-text" id="shop-name">佳美全屋定制</div>
+                <div class="logo-sub">10年本地老店 · 免费设计报价</div>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <div class="online-dot"></div>
+            <span class="online-text">客服在线</span>
+        </div>
+    </header>
+
+    <!-- ============ 主内容区 ============ -->
+    <div class="main-content">
+        <!-- 聊天区 -->
+        <div class="chat-area" id="chat-area">
+            <div class="chat-container" id="chat-container">
+                <!-- 欢迎卡片 -->
+                <div class="welcome-card" id="welcome-card">
+                    <div class="welcome-icon">
+                        <i class="fas fa-smile"></i>
+                    </div>
+                    <div class="welcome-title">您好！欢迎咨询</div>
+                    <div class="welcome-subtitle" id="welcome-text">
+                        我是佳美全屋定制的客服小王，很高兴为您服务。
+                        <br>请问您是想咨询柜子定制吗？😊
+                    </div>
+                    <div class="welcome-tips">
+                        <span class="welcome-tip">💰 透明报价</span>
+                        <span class="welcome-tip">🌿 ENF级环保</span>
+                        <span class="welcome-tip">🛠️ 自有工厂</span>
+                        <span class="welcome-tip">✅ 5年质保</span>
+                    </div>
+                </div>
+                <!-- 消息会动态插入到这里 -->
+            </div>
+        </div>
+
+        <!-- 快捷问题 -->
+        <div class="quick-questions" id="quick-questions">
+            <button class="quick-btn" onclick="sendQuickQuestion('多少钱一平？')">
+                <i class="fas fa-tag"></i> 多少钱一平？
+            </button>
+            <button class="quick-btn" onclick="sendQuickQuestion('环保吗？')">
+                <i class="fas fa-leaf"></i> 环保吗？
+            </button>
+            <button class="quick-btn" onclick="sendQuickQuestion('工期多久？')">
+                <i class="fas fa-clock"></i> 工期多久？
+            </button>
+            <button class="quick-btn" onclick="sendQuickQuestion('能优惠吗？')">
+                <i class="fas fa-gift"></i> 能优惠吗？
+            </button>
+        </div>
+
+        <!-- 输入区 -->
+        <div class="input-area">
+            <div class="input-container">
+                <textarea
+                    class="input-box"
+                    id="input-box"
+                    placeholder="请输入您的问题，比如：价格、环保、工期..."
+                    rows="1"
+                ></textarea>
+                <button class="send-btn" id="send-btn" onclick="sendMessage()" title="发送">
+                    <i class="fas fa-paper-plane"></i>
+                </button>
+            </div>
+            <div class="input-hint">按 Enter 发送，Shift+Enter 换行</div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 配置 ====================
+        const API_BASE = '/api/customer';
+        let sessionId = 'web_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+        let isLoading = false;
+
+        // DOM 元素
+        const chatArea = document.getElementById('chat-area');
+        const chatContainer = document.getElementById('chat-container');
+        const inputBox = document.getElementById('input-box');
+        const sendBtn = document.getElementById('send-btn');
+        const welcomeCard = document.getElementById('welcome-card');
+        const shopNameEl = document.getElementById('shop-name');
+        const welcomeTextEl = document.getElementById('welcome-text');
+        const quickQuestionsEl = document.getElementById('quick-questions');
+
+        // ==================== 初始化 ====================
+        async function init() {
+            try {
+                // 加载欢迎语和商家信息
+                const resp = await fetch(API_BASE + '/welcome');
+                const data = await resp.json();
+                if (data.shop_name) {
+                    shopNameEl.textContent = data.shop_name;
+                    document.title = data.shop_name + ' - AI咨询';
+                }
+                if (data.welcome_text) {
+                    welcomeTextEl.innerHTML = data.welcome_text.replace(/\n/g, '<br>');
+                }
+                // 更新快捷问题
+                if (data.quick_questions && data.quick_questions.length > 0) {
+                    const icons = ['fa-tag', 'fa-leaf', 'fa-clock', 'fa-gift'];
+                    quickQuestionsEl.innerHTML = data.quick_questions.map((q, i) =>
+                        `<button class="quick-btn" onclick="sendQuickQuestion('${q.replace(/'/g, "\\'")}')">
+                            <i class="fas ${icons[i % icons.length]}"></i> ${q}
+                        </button>`
+                    ).join('');
+                }
+            } catch (e) {
+                console.warn('加载欢迎信息失败，使用默认值:', e);
+            }
+
+            // 自动给输入框加焦点
+            inputBox.focus();
+        }
+
+        // ==================== 发送消息 ====================
+        async function sendMessage() {
+            const text = inputBox.value.trim();
+            if (!text || isLoading) return;
+
+            // 隐藏欢迎卡片
+            if (welcomeCard) {
+                welcomeCard.style.display = 'none';
+            }
+
+            // 添加用户消息
+            appendUserMessage(text);
+            inputBox.value = '';
+            autoResize();
+
+            isLoading = true;
+            sendBtn.disabled = true;
+
+            // 添加 AI 消息（空的，等流式填充）
+            const { contentEl } = appendAiMessage('');
+
+            try {
+                // 调用流式接口
+                const resp = await fetch(API_BASE + '/ask/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        question: text,
+                        session_id: sessionId,
+                    }),
+                });
+
+                if (!resp.ok) {
+                    throw new Error('HTTP ' + resp.status);
+                }
+
+                const reader = resp.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let fullText = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // 解析 SSE 事件
+                    const lines = buffer.split('\n\n');
+                    buffer = lines.pop() || '';
+
+                    for (const line of lines) {
+                        if (!line.trim()) continue;
+
+                        // 普通 data 事件（逐字）
+                        if (line.startsWith('data: ')) {
+                            const data = line.slice(6);
+                            if (data) {
+                                fullText += data;
+                                contentEl.textContent = fullText;
+                                scrollToBottom();
+                            }
+                        }
+                        // tag 事件
+                        else if (line.startsWith('event: tag')) {
+                            // 标签信息，暂不显示
+                        }
+                        // done 事件
+                        else if (line.startsWith('event: done')) {
+                            // 结束了
+                        }
+                    }
+                }
+
+                // 加上打字光标效果（结束后移除）
+                // （已经输出完了，不需要光标了）
+
+            } catch (e) {
+                console.error('发送失败:', e);
+                contentEl.textContent = '抱歉，网络有点问题，请稍后再试。';
+                // 降级：试一下非流式接口
+                try {
+                    const fallbackResp = await fetch(API_BASE + '/ask', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            question: text,
+                            session_id: sessionId,
+                        }),
+                    });
+                    const data = await fallbackResp.json();
+                    if (data.answer) {
+                        contentEl.textContent = data.answer;
+                    }
+                } catch (e2) {
+                    console.error('降级也失败:', e2);
+                }
+            }
+
+            isLoading = false;
+            sendBtn.disabled = false;
+            scrollToBottom();
+            inputBox.focus();
+        }
+
+        // ==================== 快捷问题 ====================
+        function sendQuickQuestion(text) {
+            inputBox.value = text;
+            sendMessage();
+        }
+
+        // ==================== 添加消息 ====================
+        function appendUserMessage(text) {
+            const row = document.createElement('div');
+            row.className = 'msg-row msg-row-user';
+
+            const now = new Date();
+            const timeStr = now.getHours().toString().padStart(2, '0') + ':' +
+                           now.getMinutes().toString().padStart(2, '0');
+
+            row.innerHTML = `
+                <div class="msg-avatar"><i class="fas fa-user"></i></div>
+                <div>
+                    <div class="msg-bubble">${escapeHtml(text)}</div>
+                    <div class="msg-footer">${timeStr}</div>
+                </div>
+            `;
+
+            chatContainer.appendChild(row);
+            scrollToBottom();
+            return row;
+        }
+
+        function appendAiMessage(text) {
+            const row = document.createElement('div');
+            row.className = 'msg-row msg-row-ai';
+
+            const now = new Date();
+            const timeStr = now.getHours().toString().padStart(2, '0') + ':' +
+                           now.getMinutes().toString().padStart(2, '0');
+
+            row.innerHTML = `
+                <div class="msg-avatar"><i class="fas fa-user-tie"></i></div>
+                <div style="max-width: 70%;">
+                    <div class="msg-bubble ai-content">${escapeHtml(text)}</div>
+                    <div class="msg-footer">${timeStr}</div>
+                </div>
+            `;
+
+            chatContainer.appendChild(row);
+            scrollToBottom();
+
+            const contentEl = row.querySelector('.ai-content');
+            return { row, contentEl };
+        }
+
+        // ==================== 工具函数 ====================
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function scrollToBottom() {
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function autoResize() {
+            inputBox.style.height = 'auto';
+            inputBox.style.height = Math.min(inputBox.scrollHeight, 120) + 'px';
+        }
+
+        // ==================== 事件监听 ====================
+        inputBox.addEventListener('input', autoResize);
+
+        inputBox.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+
+        // 初始化
+        init();
+    </script>
+</body>
+</html>
