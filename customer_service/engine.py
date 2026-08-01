@@ -35,7 +35,7 @@ class CustomerServiceEngine:
 
     def __init__(self, shop_id: str = None):
         """初始化：加载模板库与商家配置，准备上下文与计数器
-        
+
         Args:
             shop_id: 商家ID，不传则使用默认配置（向后兼容）
         """
@@ -48,6 +48,7 @@ class CustomerServiceEngine:
         self.chat_streak = 0             # 连续闲扯计数器（软收尾用）
         self.end_streak = 0              # 连续结束语计数器（对话结束判断用）
         self.bargain_step = 0            # 议价状态机：0=未开始 1=已摸底 2=已分档 3=已升级
+        self.llm_fallback_streak = 0     # LLM兜底连续次数（盲区检测用）
 
     # ---------- 通用辅助：抽取变量 + 渲染模板 ----------
     def _vars(self):
@@ -311,6 +312,16 @@ class CustomerServiceEngine:
             return "background"
         return "casual"
 
+    # ---------- 盲区检测 ----------
+    def _is_obscure_question(self, text):
+        """判断是不是偏门开放式问题（答不上来的那种）"""
+        obscure_keywords = [
+            "能不能做", "你们做不做", "可以做吗", "有没有",
+            "你们有", "能做吗", "做不做", "支持吗",
+            "会不会", "能做不", "有吗",
+        ]
+        return any(kw in text for kw in obscure_keywords)
+
     # ---------- 6) 对话结束判断（只日志 + 清上下文，红线：不发任何消息） ----------
     END_KEYWORDS = ["谢谢", "感谢", "好的", "再见", "拜拜", "不用了", "不需要", "再说吧"]
 
@@ -337,43 +348,57 @@ class CustomerServiceEngine:
         answer = ""
 
         # 1) 高频关键词前置命中（最高优先级，跳过工艺类和议价专属）
-        #    只要匹配到就返回，不管是不是议价相关（具体场景比通用议价更精准）
+        # 只要匹配到就返回，不管是不是议价相关（具体场景比通用议价更精准）
         hot_result = self._match_hot_question(text)
         is_bargain = self._is_bargain_question(text)
         has_size_clue = self._detect_order_size(text) is not None
 
         if hot_result is not None:
+            self.llm_fallback_streak = 0
             tag, answer = hot_result
         else:
             # 2) 工艺问题判断
             process_result = self._match_process_question(text)
             if process_result is not None:
+                self.llm_fallback_streak = 0
                 tag, answer = process_result
             elif is_bargain or (self.bargain_step > 0 and has_size_clue):
                 # 3) 议价多轮状态机
                 # 触发条件：① 有议价关键词 ② 或 已在议价中且有数量线索
                 stage, answer = self._handle_bargain(text)
+                self.llm_fallback_streak = 0
                 tag = f"bargain/{stage}"
             else:
                 # 4) LLM 意图分类（兜底）
                 intent = self.detect_intent(text)
+                self.llm_fallback_streak += 1
 
-                if intent == "chat":
-                    self.chat_streak += 1
-                    sub = "soft_end" if self.chat_streak >= 2 else self._sub_chat_type(text)
-                    pool = self.templates["chat"][sub]
-                    tag = f"chat/{sub}"
-                elif intent == "bargain":
-                    # LLM 识别为议价但关键词没命中，走状态机
-                    stage, answer = self._handle_bargain(text)
-                    tag = f"bargain/{stage}_llm"
-                else:
-                    self.chat_streak = 0
-                    pool = self.templates[intent]
-                    tag = intent
+        # 盲区兜底检测：连续2轮LLM兜底 或 偏门开放式问题
+        if self.llm_fallback_streak >= 2 or self._is_obscure_question(text):
+            unknown_pool = self.templates.get("unknown_question", [])
+            if unknown_pool:
+                answer = self._render(random.choice(unknown_pool))
+                tag = "fallback/unknown"
 
-                if not answer:
-                    answer = self._render(random.choice(pool))
+        # 正常分类逻辑（盲区兜底没命中才走）
+        if not answer:
+            if intent == "chat":
+                self.chat_streak += 1
+                sub = "soft_end" if self.chat_streak >= 2 else self._sub_chat_type(text)
+                pool = self.templates["chat"][sub]
+                tag = f"chat/{sub}"
+            elif intent == "bargain":
+                # LLM 识别为议价但关键词没命中，走状态机
+                stage, answer = self._handle_bargain(text)
+                self.llm_fallback_streak = 0
+                tag = f"bargain/{stage}_llm"
+            else:
+                self.chat_streak = 0
+                pool = self.templates[intent]
+                tag = intent
+
+            if not answer:
+                answer = self._render(random.choice(pool))
 
         # 5) 上下文记忆（最多 3 轮）
         self.history.append({"user": text, "bot": answer})
@@ -384,7 +409,8 @@ class CustomerServiceEngine:
             self.end_streak = 0
             self.history = []
             self.chat_streak = 0
-            self.bargain_step = 0  # 对话结束，议价状态重置
+            self.bargain_step = 0            # 对话结束，议价状态重置
+            self.llm_fallback_streak = 0     # 对话结束，盲区计数重置
             print("[日志] 对话已结束，上下文已清空")
 
         return tag, answer
@@ -405,4 +431,5 @@ class CustomerServiceEngine:
         self.chat_streak = 0
         self.end_streak = 0
         self.bargain_step = 0
+        self.llm_fallback_streak = 0
         return "[clear] 上下文已清空"
