@@ -176,6 +176,7 @@ class CustomerServiceEngine:
         """
         根据关键词判断单值大小
         返回：'large'=大单(全屋) 'medium'=中单(3-5个) 'small'=小单(1-2个) None=判断不出
+        支持两种表述：'X个柜子' 和 'X平方/X平米'
         """
         # 大单关键词
         large_keywords = [
@@ -201,6 +202,19 @@ class CustomerServiceEngine:
             return "small"
         if any(kw in text for kw in medium_keywords):
             return "medium"
+
+        # 按面积判断：提取数字+平方/平米/平/㎡（兼容"10个平方"这种说法）
+        import re
+        area_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:个)?\s*(?:平方|平米|平|㎡)', text)
+        if area_match:
+            area = float(area_match.group(1))
+            if area >= 15:
+                return "large"    # 15平以上算大单
+            elif area >= 5:
+                return "medium"   # 5-15平算中单
+            else:
+                return "small"    # 5平以下算小单
+
         return None
 
     def _handle_bargain(self, text):
