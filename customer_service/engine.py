@@ -180,47 +180,114 @@ class CustomerServiceEngine:
     def _detect_order_size(self, text):
         """
         根据关键词判断单值大小
-        返回：'large'=大单(全屋) 'medium'=中单(3-5个) 'small'=小单(1-2个) None=判断不出
-        支持两种表述：'X个柜子' 和 'X平方/X平米'
+        返回：(size, input_type, raw_quantity) 元组
+          - size: 'large'/'medium'/'small'/None
+          - input_type: 'area'（面积）/'count'（柜子数量）/'whole_house'（全屋）/None
+          - raw_quantity: 提取到的原始数量，如 '10'、'3'，用于模板动态插入
+        面积分档：≤5平=小单，6-29平=中单，≥30平=大单
         """
-        # 大单关键词
+        import re
+
+        # 1. 全屋类（大单）
         large_keywords = [
             "全屋", "整体", "全部", "整套", "所有房间", "全屋定制",
             "整套房子", "全房", "所有柜子", "全部做", "全套"
         ]
-        # 小单关键词
+        if any(kw in text for kw in large_keywords):
+            return ("large", "whole_house", None)
+
+        # 2. 面积检测（正则：数字 + 个(可选) + 平方/平米/平/㎡）
+        area_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:个)?\s*(?:平方|平米|平|㎡)', text)
+        if area_match:
+            raw = area_match.group(1)
+            area = float(raw)
+            if area >= 30:
+                return ("large", "area", raw)
+            elif area >= 6:
+                return ("medium", "area", raw)
+            else:
+                return ("small", "area", raw)
+
+        # 3. 柜子数量检测
+        # 小单关键词（1-2个）
         small_keywords = [
             "一个柜子", "两个柜子", "就一个", "就做一个", "就衣柜",
             "就鞋柜", "一二个", "一两个", "只做一个", "1个", "2个",
             "就一个柜子", "单个", "一个房间"
         ]
-        # 中单关键词
+        # 中单关键词（3-5个）
         medium_keywords = [
             "三个柜子", "四个柜子", "五个柜子", "三四个", "四五个",
             "几个柜子", "两三", "三四", "四五", "3个", "4个", "5个",
             "几个", "两三个", "三四个柜子"
         ]
-
-        if any(kw in text for kw in large_keywords):
-            return "large"
-        if any(kw in text for kw in small_keywords):
-            return "small"
-        if any(kw in text for kw in medium_keywords):
-            return "medium"
-
-        # 按面积判断：提取数字+平方/平米/平/㎡（兼容"10个平方"这种说法）
-        import re
-        area_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:个)?\s*(?:平方|平米|平|㎡)', text)
-        if area_match:
-            area = float(area_match.group(1))
-            if area >= 15:
-                return "large"    # 15平以上算大单
-            elif area >= 5:
-                return "medium"   # 5-15平算中单
+        # 尝试提取具体数字
+        count_match = re.search(r'(\d+)\s*(?:个|套)', text)
+        count_num = None
+        if count_match:
+            count_num = int(count_match.group(1))
+            if count_num >= 6:
+                return ("large", "count", count_match.group(1))
+            elif count_num >= 3:
+                return ("medium", "count", count_match.group(1))
             else:
-                return "small"    # 5平以下算小单
+                return ("small", "count", count_match.group(1))
 
-        return None
+        # 没有数字但有关键词
+        if any(kw in text for kw in small_keywords):
+            # 找个大概数量描述
+            if "一个" in text or "1个" in text or "就一个" in text:
+                return ("small", "count", "1")
+            elif "两个" in text or "2个" in text:
+                return ("small", "count", "2")
+            return ("small", "count", "一两")
+        if any(kw in text for kw in medium_keywords):
+            if "三四个" in text or "三四" in text:
+                return ("medium", "count", "三四")
+            elif "四五个" in text or "四五" in text:
+                return ("medium", "count", "四五")
+            elif "3个" in text:
+                return ("medium", "count", "3")
+            elif "4个" in text:
+                return ("medium", "count", "4")
+            elif "5个" in text:
+                return ("medium", "count", "5")
+            return ("medium", "count", "三四")
+
+        return (None, None, None)
+        return (None, None, None)
+
+    def _gen_order_desc(self, size_val, input_type, raw_quantity):
+        """
+        根据订单信息生成描述字符串，用于模板动态插入
+        - 面积输入 → "10个平方"
+        - 柜子数量输入 → "3个柜子"
+        - 全屋类输入 → "全屋"
+        - 判断不出 → "您这单"
+        """
+        if input_type == "area" and raw_quantity:
+            return f"{raw_quantity}个平方"
+        elif input_type == "count" and raw_quantity:
+            return f"{raw_quantity}个柜子"
+        elif input_type == "whole_house":
+            return "全屋"
+        else:
+            return "您这单"
+
+    def _get_order_info(self):
+        """
+        从历史记录里找最近的订单信息，用于模板渲染
+        返回：(size_val, input_type, raw_quantity, order_desc)
+        """
+        # 先从历史里找
+        for h in reversed(self.history):
+            size_val, input_type, raw_qty = self._detect_order_size(h["user"])
+            if size_val:
+                order_desc = self._gen_order_desc(size_val, input_type, raw_qty)
+                return size_val, input_type, raw_qty, order_desc
+        # 找不到就返回默认（兜底）
+        return "medium", None, None, "您这单"
+
 
     def _handle_bargain(self, text):
         """
@@ -240,16 +307,18 @@ class CustomerServiceEngine:
         is_price = self._is_price_question(text)
         is_bargain = self._is_bargain_question(text)
         is_end = self._is_end_conversation(text)
-        order_size = self._detect_order_size(text)
+        size_val, input_type, raw_qty = self._detect_order_size(text)
+        order_desc = self._gen_order_desc(size_val, input_type, raw_qty)
         material = self._detect_material_choice(text)
         preference = self._detect_preference_type(text)
 
         # 从历史里找线索（本轮判断不出就看历史）
-        if order_size is None:
+        if size_val is None:
             for h in self.history:
-                size = self._detect_order_size(h["user"])
-                if size:
-                    order_size = size
+                s_val, s_type, s_raw = self._detect_order_size(h["user"])
+                if s_val:
+                    size_val, input_type, raw_qty = s_val, s_type, s_raw
+                    order_desc = self._gen_order_desc(size_val, input_type, raw_qty)
                     break
         if material is None:
             for h in self.history:
@@ -263,11 +332,11 @@ class CustomerServiceEngine:
             return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
 
         # ========== 特殊场景：一步到位（既说了材料又说了数量）==========
-        if material and order_size and self.bargain_step <= 2:
+        if material and size_val and self.bargain_step <= 2:
             self.bargain_step = 4
             self.bargain_pullback_count = 0
-            return order_size, self._render_bargain_template(
-                f"bargain_{order_size}", material=material
+            return size_val, self._render_bargain_template(
+                f"bargain_{size_val}", material=material, order_desc=order_desc
             )
 
         # ========== Step 0：初次进入：先报价格区间 ==========
@@ -343,8 +412,8 @@ class CustomerServiceEngine:
                     "bargain_material_price", material=main_mat
                 )
 
-            # 只说了面积没说材料 → 按默认材料报价，进step2
-            if order_size:
+            # 只说了面积/数量没说材料 → 按默认材料报价，进step2
+            if size_val:
                 default_mat = self.config.get("default_material", "particle_board")
                 self.bargain_step = 2
                 self.bargain_pullback_count = 0
@@ -391,13 +460,14 @@ class CustomerServiceEngine:
                     "bargain_material_price", material=material
                 )
 
-            # 说了面积 → 按材料+数量直接给优惠价，跳step4
-            if order_size:
+            # 说了面积/数量 → 按材料+数量直接给优惠价，跳step4
+            if size_val:
                 self.bargain_step = 4
                 self.bargain_pullback_count = 0
-                return order_size, self._render_bargain_template(
-                    f"bargain_{order_size}",
-                    material=material or self.config.get("default_material", "particle_board")
+                return size_val, self._render_bargain_template(
+                    f"bargain_{size_val}",
+                    material=material or self.config.get("default_material", "particle_board"),
+                    order_desc=order_desc
                 )
 
             # 其他情况 → 拉回正题
@@ -409,12 +479,13 @@ class CustomerServiceEngine:
         # ========== Step 3：等用户报面积/数量 ==========
         if self.bargain_step == 3:
             # 有面积/数量线索 → 给优惠价，进step4
-            if order_size:
+            if size_val:
                 self.bargain_step = 4
                 self.bargain_pullback_count = 0
-                return order_size, self._render_bargain_template(
-                    f"bargain_{order_size}",
-                    material=material or self.config.get("default_material", "particle_board")
+                return size_val, self._render_bargain_template(
+                    f"bargain_{size_val}",
+                    material=material or self.config.get("default_material", "particle_board"),
+                    order_desc=order_desc
                 )
 
             # 说不知道/没量过 → 默认走中单（不跑丢），进step4
@@ -424,7 +495,8 @@ class CustomerServiceEngine:
                 self.bargain_pullback_count = 0
                 return "medium", self._render_bargain_template(
                     "bargain_medium",
-                    material=material or self.config.get("default_material", "particle_board")
+                    material=material or self.config.get("default_material", "particle_board"),
+                    order_desc="您这单"
                 )
 
             # 不正面回答（让先报价）→ 拉回正题
@@ -440,7 +512,8 @@ class CustomerServiceEngine:
             self.bargain_pullback_count = 0
             return "medium", self._render_bargain_template(
                 "bargain_medium",
-                material=material or self.config.get("default_material", "particle_board")
+                material=material or self.config.get("default_material", "particle_board"),
+                order_desc="您这单"
             )
 
         # ========== Step 4 及以后 ==========
@@ -473,10 +546,11 @@ class CustomerServiceEngine:
         # 兜底
         return "咱先把这事定下来？"
 
-    def _render_bargain_template(self, category_name, material=None):
+    def _render_bargain_template(self, category_name, material=None, order_desc=None):
         """
         从 hot_questions 中找到指定分类的模板，随机选一个渲染
         material 参数：选中的材料key，用于计算 material_name/material_price 等变量
+        order_desc 参数：订单描述字符串，用于 {{order_desc}} 占位符
         """
         for hot_q in self.templates.get("hot_questions", []):
             if hot_q.get("category") == category_name:
@@ -485,6 +559,8 @@ class CustomerServiceEngine:
                     template_str = random.choice(templates_list)
                     # 如果有材料信息，组装额外变量
                     extra_vars = {}
+                    if order_desc:
+                        extra_vars["order_desc"] = order_desc
                     if material:
                         extra_vars["material_name"] = get_material_name(material)
                         extra_vars["material_price"] = get_material_price(self.config, material)
