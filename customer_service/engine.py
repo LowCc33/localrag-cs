@@ -554,6 +554,58 @@ class CustomerServiceEngine:
         ]
         return any(kw in text for kw in end_keywords)
 
+    def _detect_contact_info(self, text):
+        """
+        留资检测：识别用户是否留了联系方式
+        返回：phone / wechat / address / appointment / None
+        优先级：最高，放主逻辑最前面
+        """
+        import re
+
+        # 1. 手机号正则（11位，1开头第二位3-9）
+        if re.search(r'1[3-9]\d{9}', text):
+            return "phone"
+
+        # 2. 座机号（带区号的固话）
+        if re.search(r'0\d{2,3}[ -]?\d{7,8}', text):
+            return "phone"
+
+        # 3. 电话/联系方式关键词
+        phone_keywords = [
+            "电话", "手机号", "手机", "联系方式", "联系我", "打给我",
+            "我电话", "给我打", "留个电话", "留个联系方式",
+        ]
+        if any(kw in text for kw in phone_keywords):
+            return "phone"
+
+        # 4. 微信相关（主动留微信 / 让加微信）
+        # 注意："你微信多少"这种问的不算，是正常咨询
+        wechat_keywords = [
+            "加我微信", "我微信", "我v信", "我vx", "加我vx", "加我v",
+            "加我吧", "你加我", "我加你", "微信号是", "我微信号",
+        ]
+        if any(kw in text for kw in wechat_keywords):
+            return "wechat"
+
+        # 5. 确认加了/通过一下
+        confirm_keywords = [
+            "加了", "加你了", "通过一下", "同意一下", "发过去了", "申请了",
+            "好友申请", "加你微信了",
+        ]
+        if any(kw in text for kw in confirm_keywords):
+            return "wechat"
+
+        # 6. 地址/约量房/上门
+        address_keywords = [
+            "地址", "上门", "量房", "过来看看", "到店", "去你们那",
+            "什么时候有空", "约一下", "约个时间", "来我家", "我在",
+            "我住", "小区", "来量房", "上门量", "免费量房",
+        ]
+        if any(kw in text for kw in address_keywords):
+            return "address"
+
+        return None
+
     def _is_bargain_question(self, text):
         """判断是不是议价相关问题（命中 bargain 类关键词）"""
         bargain_keywords = [
@@ -641,6 +693,22 @@ class CustomerServiceEngine:
         """
         tag = ""
         answer = ""
+
+        # 0) 最高优先级：留资检测（客户留了联系方式，比啥都重要）
+        contact_type = self._detect_contact_info(text)
+        if contact_type is not None:
+            self.llm_fallback_streak = 0
+            self.bargain_step = 0
+            self.bargain_pullback_count = 0
+            # 从模板组找留资成功话术
+            for hot_q in self.templates.get("hot_questions", []):
+                if hot_q.get("category") == "lead_capture_success":
+                    templates_list = hot_q.get("templates", [])
+                    if templates_list:
+                        answer = self._render(random.choice(templates_list))
+                        return "lead_capture", answer
+            # 兜底话术
+            return "lead_capture", "好的收到，我记下了，一会就联系您。"
 
         # 1) 高频关键词前置命中（最高优先级，跳过工艺类和议价专属）
         # 只要匹配到就返回，不管是不是议价相关（具体场景比通用议价更精准）
