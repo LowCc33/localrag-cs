@@ -6,7 +6,8 @@
     "city": "",
     "shop_location": "",
     "wechat_id": "",
-    "after_sales_phone": ""
+    "after_sales_phone": "",
+    "default_material": "particle_board"
   },
   "pricing": {
     "base_price_method": "",

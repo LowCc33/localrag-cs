@@ -27,7 +27,10 @@ MODEL = os.getenv("DEEPSEEK_MODEL", "ep-20260630143620-87j6b")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 商家配置加载器（支持多商家私有配置）
-from customer_service.shop_config_loader import load_shop_config
+from customer_service.shop_config_loader import (
+    load_shop_config, get_price_range, get_materials_list_text,
+    get_material_price, get_material_name, MATERIAL_PRICE_KEY_MAP
+)
 
 
 class CustomerServiceEngine:
@@ -219,59 +222,186 @@ class CustomerServiceEngine:
 
     def _handle_bargain(self, text):
         """
-        议价状态机处理
+        议价状态机（4步流程：报价→选材料→摸底→优惠→升级）
         返回：(阶段名, 话术内容)
-        状态流转：0(未开始) → 1(已摸底) → 2(已分档) → 3(已升级)
-        同一客户连续问价格相关问题，逐步深入，不重复
+
+        状态定义：
+          0 = 未开始
+          1 = 已报价格区间（等用户选材料）
+          2 = 已报选中材料的实价（等用户问优惠）
+          3 = 已发摸底反问（等用户报面积/数量）
+          4 = 已给优惠报价
+          5+ = 升级话术
         """
-        # 从历史里找单值线索（如果本轮判断不出，看历史有没有）
+        is_price = self._is_price_question(text)
+        is_bargain = self._is_bargain_question(text)
         order_size = self._detect_order_size(text)
+        material = self._detect_material_choice(text)
+
+        # 从历史里找线索（本轮判断不出就看历史）
         if order_size is None:
             for h in self.history:
                 size = self._detect_order_size(h["user"])
                 if size:
                     order_size = size
                     break
+        if material is None:
+            for h in self.history:
+                mat = self._detect_material_choice(h["user"])
+                if mat:
+                    material = mat
+                    break
 
+        # ========== 特殊场景：一步到位（既说了材料又说了数量） ==========
+        if material and order_size and self.bargain_step <= 2:
+            self.bargain_step = 4
+            return order_size, self._render_bargain_template(
+                f"bargain_{order_size}", material=material
+            )
+
+        # ========== Step 0：初次进入：先报价格区间 ==========
         if self.bargain_step == 0:
-            # 第一步：如果能直接判断单值大小，直接跳分档；否则摸底
-            if order_size == "large":
+            self.bargain_step = 1
+            return "price_range", self._render_bargain_template("bargain_price_range")
+
+        # ========== Step 1：等用户选材料 ==========
+        if self.bargain_step == 1:
+            # 特殊：用户说了材料 → 报实价，跳到step2
+            if material:
                 self.bargain_step = 2
-                return "large", self._render_bargain_template("bargain_large")
-            elif order_size == "small":
+                return "material_price", self._render_bargain_template(
+                    "bargain_material_price", material=material
+                )
+            # 用户说了面积但没说材料 → 按默认材料报价，跳到step2
+            elif order_size:
+                default_mat = self.config.get("default_material", "particle_board")
                 self.bargain_step = 2
-                return "small", self._render_bargain_template("bargain_small")
-            elif order_size == "medium":
-                self.bargain_step = 2
-                return "medium", self._render_bargain_template("bargain_medium")
+                return "material_price", self._render_bargain_template(
+                    "bargain_material_price", material=default_mat
+                )
+            # 砍价直接来的话 → 也先报价格区间（重复step1，但换个说法）
+            elif is_bargain:
+                return "price_range", self._render_bargain_template("bargain_price_range")
+            # 识别不出 → 追问需求方向，留在step1
             else:
-                self.bargain_step = 1
+                return "material_clarify", self._render_bargain_template("bargain_material_clarify")
+
+        # ========== Step 2：等用户问优惠 ==========
+        if self.bargain_step == 2:
+            # 用户问优惠/砍价 → 摸底反问，进step3
+            if is_bargain:
+                self.bargain_step = 3
                 return "probe", self._render_bargain_template("bargain_probe")
-
-        elif self.bargain_step == 1:
-            # 第二步：根据单值分档
-            self.bargain_step = 2
-            if order_size == "large":
-                return "large", self._render_bargain_template("bargain_large")
-            elif order_size == "small":
-                return "small", self._render_bargain_template("bargain_small")
+            # 用户又说面积 → 按材料+数量直接给优惠价，跳step4
+            elif order_size:
+                self.bargain_step = 4
+                return order_size, self._render_bargain_template(
+                    f"bargain_{order_size}",
+                    material=material or self.config.get("default_material", "particle_board")
+                )
+            # 用户选了另一种材料 → 换材料价格
+            elif material:
+                return "material_price", self._render_bargain_template(
+                    "bargain_material_price", material=material
+                )
+            # 其他情况 → 重复材料相关话术还是报价话术
+            #（比如用户说"行的的的话
             else:
-                # 判断不出默认走中单（保守策略）
-                return "medium", self._render_bargain_template("bargain_medium")
+                return "material_price", self._render_bargain_template(
+                    "bargain_material_price",
+                    material=material or self.config.get("default_material", "particle_board")
+                )
 
-        else:  # bargain_step >= 2
-            # 第三步及以后：升级话术（搬出老板）
-            return "upgrade", self._render_bargain_template("bargain_upgrade")
+        # ========== Step 3：等用户报面积/数量 ==========
+        if self.bargain_step == 3:
+            # 有面积线索 → 给优惠价，进step4
+            if order_size:
+                self.bargain_step = 4
+                return order_size, self._render_bargain_template(
+                    f"bargain_{order_size}",
+                    material=material or self.config.get("default_material", "particle_board")
+                )
+            # 检测不出 → 默认走中单（不跑丢，进step4
+            else:
+                self.bargain_step = 4
+                return "medium", self._render_bargain_template(
+                    "bargain_medium",
+                    material=material or self.config.get("default_material", "particle_board")
+                )
 
-    def _render_bargain_template(self, category_name):
-        """从 hot_questions 中找到指定分类的模板，随机选一个渲染"""
+        # ========== Step 4 及以后：升级话术 ==========
+        # bargain_step >= 4
+        return "upgrade", self._render_bargain_template("bargain_upgrade")
+
+    def _render_bargain_template(self, category_name, material=None):
+        """
+        从 hot_questions 中找到指定分类的模板，随机选一个渲染
+        material 参数：选中的材料key，用于计算 material_name/material_price 等变量
+        """
         for hot_q in self.templates.get("hot_questions", []):
             if hot_q.get("category") == category_name:
                 templates_list = hot_q.get("templates", [])
                 if templates_list:
-                    return self._render(random.choice(templates_list))
+                    template_str = random.choice(templates_list)
+                    # 如果有材料信息，组装额外变量
+                    extra_vars = {}
+                    if material:
+                        extra_vars["material_name"] = get_material_name(material)
+                        extra_vars["material_price"] = get_material_price(self.config, material)
+                        extra_vars["price_method"] = self.config.get("_base_price_method", "投影面积")
+                        extra_vars["hardware"] = self.config.get("hardware_brand", "")
+                        extra_vars["edge_band"] = self.config.get("edge_band", "")
+                        extra_vars["price_range_low"], extra_vars["price_range_high"] = get_price_range(self.config)
+                        extra_vars["materials_list"] = get_materials_list_text(self.config)
+                    # 价格区间模板也需要这些变量
+                    if category_name == "bargain_price_range":
+                        extra_vars["price_range_low"], extra_vars["price_range_high"] = get_price_range(self.config)
+                        extra_vars["materials_list"] = get_materials_list_text(self.config)
+                    return self._render_with_extra(template_str, extra_vars)
         # 找不到兜底
         return "价格好商量，您具体有什么需求？"
+
+    def _render_with_extra(self, template_str, extra_vars):
+        """用额外变量渲染模板（在 _vars 基础上再加）"""
+        from jinja2 import Template
+        vars_dict = self._vars()
+        if extra_vars:
+            vars_dict.update(extra_vars)
+        return Template(template_str).render(**vars_dict)
+
+    def _is_price_question(self, text):
+        """判断是不是纯问价类问题（多少钱/怎么卖/价格/报价等）"""
+        price_keywords = [
+            "多少钱", "怎么卖", "什么价", "价格", "价位",
+            "报价", "费用", "怎么收费", "咋卖", "多钱",
+            "价钱", "单价", "多少钱一平", "多少钱一米",
+        ]
+        return any(kw in text for kw in price_keywords)
+
+    def _detect_material_choice(self, text):
+        """
+        识别用户选择了哪种材料
+        返回材料key：particle_board/multi_layer_board/ecological_board/solid_wood/osb_board
+        识别不到返回 None
+        """
+        # 材料关键词映射（材料key → 关键词列表）
+        material_keywords = {
+            "particle_board": ["颗粒板", "刨花板", "799", "899"],
+            "multi_layer_board": ["多层板", "胶合板", "1099", "1299"],
+            "ecological_board": ["生态板", "免漆板", "1199", "1399"],
+            "solid_wood": ["实木", "原木板", "1699", "1899"],
+            "osb_board": ["OSB板", "欧松板", "osb", "OSB", "999", "1199"],
+        }
+
+        best_material = None
+        best_count = 0
+        for mat_key, keywords in material_keywords.items():
+            count = sum(1 for kw in keywords if kw in text)
+            if count > best_count:
+                best_count = count
+                best_material = mat_key
+
+        return best_material if best_count > 0 else None
 
     def _is_bargain_question(self, text):
         """判断是不是议价相关问题（命中 bargain 类关键词）"""
@@ -366,12 +496,12 @@ class CustomerServiceEngine:
         # 例外：已进入议价状态(bargain_step>=2)且是议价关键词 → 走议价升级，不走普通比价模板
         hot_result = self._match_hot_question(text)
         is_bargain = self._is_bargain_question(text)
+        is_price_question = self._is_price_question(text)
         has_size_clue = self._detect_order_size(text) is not None
 
-        # 已在议价分档阶段(bargain_step>=2)且是议价相关问题 → 跳过关键词命中，走议价升级
-        if hot_result is not None and self.bargain_step >= 2 and is_bargain:
-            # 只有当命中的是比价类（而不是更具体的场景类）时才让位给议价升级
-            # 具体场景类（如环保/工艺/质保）优先级仍然高于议价
+        # 已在议价后段(bargain_step>=4)且是砍价问题 → 跳过关键词命中，走议价升级
+        # 只有当命中的是比价类模板时才让位，具体场景类（环保/工艺/质保）优先级仍然最高
+        if hot_result is not None and self.bargain_step >= 4 and is_bargain:
             bargain_related_cats = ['why_cheaper_elsewhere', 'same_board_diff_price', 'hidden_cost']
             if hot_result[0] in bargain_related_cats:
                 hot_result = None  # 让给议价状态机处理
@@ -385,11 +515,10 @@ class CustomerServiceEngine:
             if process_result is not None:
                 self.llm_fallback_streak = 0
                 tag, answer = process_result
-            elif is_bargain or self.bargain_step > 0:
+            elif is_bargain or is_price_question or self.bargain_step > 0:
                 # 3) 议价多轮状态机
-                # 触发条件：① 有议价关键词 ② 或 已在议价流程中（bargain_step>0）
-                # 注意：已在议价中时不需要有数量线索，任何回复都交给状态机处理
-                #       检测不出单值时状态机内部有降级逻辑（默认走中单），不会崩
+                # 触发条件：① 有砍价关键词 ② 有问价关键词 ③ 或已在议价流程中
+                # 一旦进了议价流程就不跑丢，内部有降级逻辑
                 stage, answer = self._handle_bargain(text)
                 self.llm_fallback_streak = 0
                 tag = f"bargain/{stage}"

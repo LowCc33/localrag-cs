@@ -60,7 +60,33 @@ unknown_question:
 
 hot_questions:
 
-  # ================ 一、议价体系（6个场景） ================
+  # ================ 一、议价体系（9个场景） ================
+
+  # 0.1 报价格区间（议价状态机专用 Step 0→1）
+  - category: bargain_price_range
+    bargain_only: true
+    keywords: []
+    templates:
+      - "咱这价格从{{price_range_low}}到{{price_range_high}}一平都有，主要看材料。{{materials_list}}，您大概想用哪种？"
+      - "价格多少主要看您选啥材料，{{materials_list}}，档次不一样价格差不少。您预算大概多少？我给您推荐个性价比高的。"
+      - "一平{{price_range_low}}到{{price_range_high}}不等，颗粒板最便宜，实木最贵。您是注重环保还是性价比？我给您推荐。"
+
+  # 0.2 选定材料后的实价（议价状态机专用 Step 1→2）
+  - category: bargain_material_price
+    bargain_only: true
+    keywords: []
+    templates:
+      - "{{material_name}}的话是{{material_price}}一平，{{price_method}}计算。标配{{hardware}}五金、{{edge_band}}封边，环保等级都是达标的，您放心。"
+      - "{{material_name}}一平{{material_price}}，按{{price_method}}算。五金用的{{hardware}}，封边是{{edge_band}}，这配置在同价位里很能打了。"
+      - "您选的{{material_name}}是{{material_price}}一平，计价方式是{{price_method}}。标配{{hardware}}，封边{{edge_band}}，您看这配置行吗？"
+
+  # 0.3 没识别出材料时追问（议价状态机专用 Step 1停留）
+  - category: bargain_material_clarify
+    bargain_only: true
+    keywords: []
+    templates:
+      - "您主要关注哪方面？环保、性价比还是颜值？我给您推荐合适的材料。"
+      - "材料这东西一分钱一分货，您预算大概多少一平？我给您找个性价比最高的。"
 
   # 1.1 议价第一步：反问摸底（议价状态机专用）
   - category: bargain_probe

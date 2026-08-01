@@ -79,12 +79,17 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
         "city": basic.get("city", ""),
         "shop_location": basic.get("shop_location", ""),
         "wechat_id": basic.get("wechat_id", ""),
+        "default_material": basic.get("default_material", "particle_board"),
 
         # === 产品硬参数 ===
         "board_brand": materials.get("default_board_brand", ""),
         "edge_band": materials.get("default_edge_band", ""),
         "hardware_brand": materials.get("default_hardware_brand", ""),
         "eco_level": materials.get("default_eco_level", ""),
+
+        # === 价格信息（供议价状态机用） ===
+        "_pricing": pricing,  # 原始价格表，内部方法用
+        "_base_price_method": pricing.get("base_price_method", "投影面积"),
 
         # === 工艺能力（JSON里没单独定义，默认全开，商家可自行添加） ===
         "process_capability": {
@@ -142,6 +147,69 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
     }
 
     return result
+
+
+# 材料 key → 中文名 映射
+MATERIAL_NAME_MAP = {
+    "particle_board": "颗粒板",
+    "multi_layer_board": "多层板",
+    "osb_board": "欧松板",
+    "ecological_board": "生态板",
+    "solid_wood": "实木板",
+}
+
+# 材料key → 价格字段名 映射
+MATERIAL_PRICE_KEY_MAP = {
+    "particle_board": "particle_board_price",
+    "multi_layer_board": "multi_layer_board_price",
+    "osb_board": "osb_board_price",
+    "ecological_board": "ecological_board_price",
+    "solid_wood": "solid_wood_price",
+}
+
+
+def get_material_name(material_key: str) -> str:
+    """材料key转中文名"""
+    return MATERIAL_NAME_MAP.get(material_key, material_key)
+
+
+def get_price_range(config: dict) -> tuple:
+    """
+    计算价格区间（最低价, 最高价）
+    从 _pricing 里读各种板材价格，取最小和最大
+    """
+    pricing = config.get("_pricing", {})
+    prices = []
+    for price_key in MATERIAL_PRICE_KEY_MAP.values():
+        p = pricing.get(price_key, 0)
+        if p and p > 0:
+            prices.append(p)
+    if not prices:
+        return 0, 0
+    return min(prices), max(prices)
+
+
+def get_materials_list_text(config: dict) -> str:
+    """
+    生成材料价格列表字符串，比如"颗粒板799/多层板1099/生态板1199"
+    """
+    pricing = config.get("_pricing", {})
+    items = []
+    for mat_key, price_key in MATERIAL_PRICE_KEY_MAP.items():
+        price = pricing.get(price_key, 0)
+        if price and price > 0:
+            name = MATERIAL_NAME_MAP.get(mat_key, mat_key)
+            items.append(f"{name}{price}")
+    return "/".join(items)
+
+
+def get_material_price(config: dict, material_key: str) -> int:
+    """获取指定材料的价格"""
+    pricing = config.get("_pricing", {})
+    price_key = MATERIAL_PRICE_KEY_MAP.get(material_key, "")
+    if not price_key:
+        return 0
+    return pricing.get(price_key, 0)
 
 
 def format_shop_info_text(shop_id: str = None) -> str:
