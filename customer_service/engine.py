@@ -798,6 +798,43 @@ class CustomerServiceEngine:
         ]
         return any(kw in text for kw in bargain_keywords)
 
+    def _is_bargain_related(self, text):
+        """
+        判断本轮输入是否跟议价话题相关
+        （用于状态机入口判断：在状态中 + 输入相关 才走状态机）
+        """
+        if self._is_price_question(text):
+            return True
+        if self._is_bargain_question(text):
+            return True
+        if self._detect_material_choice(text):
+            return True
+        if self._detect_preference_type(text):
+            # 注意：只有明确的偏好选择才算（"要环保的""性价比高的"）
+            # 纯提问形式（"环保吗""质量怎么样"）不算，让它走知识库回答
+            pref = self._detect_preference_type(text)
+            # 环保偏好需要有选择意味（的/点/型），纯提问不算
+            if pref == "eco_friendly":
+                eco_choice_words = ["环保的", "环保点", "环保型", "要环保", "选环保", "注重环保"]
+                if not any(w in text for w in eco_choice_words):
+                    pass  # 纯提问，不算议价相关
+                else:
+                    return True
+            else:
+                return True
+        size_val, _, _ = self._detect_order_size(text)
+        if size_val:
+            return True
+        if self._detect_room_type(text):
+            return True
+        if self._is_end_conversation(text):
+            return True
+        # 确认/认可类（议价中的"行""可以""嗯"等属于推进议价）
+        confirm_keywords = ["行", "可以", "好的", "嗯", "ok", "OK", "行吧", "还行吧"]
+        if any(kw == text.strip() or kw in text for kw in confirm_keywords):
+            return True
+        return False
+
     # ---------- 4) LLM 4 分类意图识别（兜底用） ----------
     def _get_redis(self):
         """获取Redis连接，单例模式，连接失败返回None（降级）"""
@@ -997,8 +1034,9 @@ class CustomerServiceEngine:
         is_bargain = self._is_bargain_question(text)
         is_price_question = self._is_price_question(text)
 
-        # ========== 分支1：已在议价中 → 直接走议价状态机 ==========
-        if self.bargain_step > 0:
+        # ========== 分支1：已在议价中 且 本轮输入相关 → 走议价状态机 ==========
+        is_bargain_rel = self._is_bargain_related(text)
+        if self.bargain_step > 0 and is_bargain_rel:
             stage, answer = self._handle_bargain(text)
             self.llm_fallback_streak = 0
             tag = f"bargain/{stage}"
