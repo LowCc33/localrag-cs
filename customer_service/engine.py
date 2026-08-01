@@ -26,16 +26,24 @@ MODEL = os.getenv("DEEPSEEK_MODEL", "ep-20260630143620-87j6b")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
+# 商家配置加载器（支持多商家私有配置）
+from customer_service.shop_config_loader import load_shop_config
+
 
 class CustomerServiceEngine:
     """客服引擎 v2.0"""
 
-    def __init__(self):
-        """初始化：加载模板库与商家配置，准备上下文与计数器"""
+    def __init__(self, shop_id: str = None):
+        """初始化：加载模板库与商家配置，准备上下文与计数器
+        
+        Args:
+            shop_id: 商家ID，不传则使用默认配置（向后兼容）
+        """
+        self.shop_id = shop_id
         with open(os.path.join(BASE_DIR, "templates.yaml"), encoding="utf-8") as f:
             self.templates = yaml.safe_load(f)
-        with open(os.path.join(BASE_DIR, "shop_config.yaml"), encoding="utf-8") as f:
-            self.config = yaml.safe_load(f)
+        # 根据 shop_id 加载对应商家配置（None 则用默认配置）
+        self.config = load_shop_config(shop_id)
         self.history = []                # 上下文记忆，最多留 3 轮
         self.chat_streak = 0             # 连续闲扯计数器（软收尾用）
         self.end_streak = 0              # 连续结束语计数器（对话结束判断用）

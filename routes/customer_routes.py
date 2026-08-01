@@ -44,7 +44,14 @@ SESSION_TIMEOUT = 30 * 60     # 会话超时时间（秒）= 30分钟
 _sessions: "OrderedDict[str, dict]" = OrderedDict()
 
 
-def _get_or_create_session(session_id: str) -> CustomerServiceEngine:
+def _session_key(session_id: str, shop_id: str = None) -> str:
+    """生成会话唯一key：session_id + shop_id 组合，不同商家互不干扰"""
+    if shop_id:
+        return f"{shop_id}:{session_id}"
+    return f"default:{session_id}"
+
+
+def _get_or_create_session(session_id: str, shop_id: str = None) -> CustomerServiceEngine:
     """
     获取或创建会话
     - 存在：移到末尾（标记为最新），检查是否超时
@@ -52,22 +59,24 @@ def _get_or_create_session(session_id: str) -> CustomerServiceEngine:
     - 超过最大数量：踢最老的
     """
     now = time.time()
+    key = _session_key(session_id, shop_id)
 
     # 先清理一遍超时会话（顺便做定期清理，不用单独开线程）
     _cleanup_expired()
 
-    if session_id in _sessions:
+    if key in _sessions:
         # 移到末尾（标记最新）
-        _sessions.move_to_end(session_id)
-        sess = _sessions[session_id]
+        _sessions.move_to_end(key)
+        sess = _sessions[key]
         sess["last_active"] = now
         return sess["engine"]
     else:
-        # 新建会话
-        engine = CustomerServiceEngine()
-        _sessions[session_id] = {
+        # 新建会话（带上商家配置）
+        engine = CustomerServiceEngine(shop_id=shop_id)
+        _sessions[key] = {
             "engine": engine,
             "last_active": now,
+            "shop_id": shop_id,
         }
         # 超过上限，踢最老的
         if len(_sessions) > MAX_SESSIONS:
@@ -97,11 +106,13 @@ class AskRequest(BaseModel):
     """问答请求体"""
     question: str
     session_id: str = "default"
+    shop_id: str = None  # 商家ID，可选，不传用默认配置
 
 
 class ClearRequest(BaseModel):
     """清空会话请求体"""
     session_id: str = "default"
+    shop_id: str = None  # 商家ID，可选
 
 
 # ==================== 接口1：非流式问答 ====================
@@ -110,10 +121,10 @@ class ClearRequest(BaseModel):
 async def ask(req: AskRequest):
     """
     非流式问答接口
-    请求：{ "question": "xxx", "session_id": "xxx" }
+    请求：{ "question": "xxx", "session_id": "xxx", "shop_id": "xxx" }
     返回：{ "tag": "bargain/probe", "answer": "话术内容" }
     """
-    engine = _get_or_create_session(req.session_id)
+    engine = _get_or_create_session(req.session_id, req.shop_id)
     tag, answer = engine.reply(req.question)
     return JSONResponse(content={
         "tag": tag,
@@ -133,7 +144,7 @@ async def ask_stream(req: AskRequest):
         - tag: 话术分类标签（在文本之前发送）
         - done: 结束
     """
-    engine = _get_or_create_session(req.session_id)
+    engine = _get_or_create_session(req.session_id, req.shop_id)
     tag, answer = engine.reply(req.question)
 
     async def generate():
@@ -167,30 +178,31 @@ async def ask_stream(req: AskRequest):
 async def clear_session(req: ClearRequest):
     """
     清空指定会话的上下文
-    请求：{ "session_id": "xxx" }
+    请求：{ "session_id": "xxx", "shop_id": "xxx" }
     返回：{ "status": "ok" }
     """
-    if req.session_id in _sessions:
-        engine = _sessions[req.session_id]["engine"]
+    key = _session_key(req.session_id, req.shop_id)
+    if key in _sessions:
+        engine = _sessions[key]["engine"]
         engine.clear()
         # 更新最后活跃时间
-        _sessions[req.session_id]["last_active"] = time.time()
-        _sessions.move_to_end(req.session_id)
+        _sessions[key]["last_active"] = time.time()
+        _sessions.move_to_end(key)
     return JSONResponse(content={"status": "ok"})
 
 
 # ==================== 接口4：获取欢迎语和商家信息 ====================
 
 @router.get("/welcome")
-async def welcome():
+async def welcome(shop_id: str = None):
     """
     获取欢迎语和商家基本信息
+    参数：shop_id（可选，不传用默认配置）
     返回：{ "shop_name": "...", "welcome_text": "...", "quick_questions": [...] }
     """
-    # 读取商家配置
-    config_path = PROJECT_ROOT / "customer_service" / "shop_config.yaml"
-    with open(config_path, encoding="utf-8") as f:
-        config = yaml.safe_load(f)
+    # 读取商家配置（支持多商家）
+    from customer_service.shop_config_loader import load_shop_config
+    config = load_shop_config(shop_id)
 
     shop_name = config.get("shop_name", "佳美全屋定制")
     boss_name = config.get("boss_name", "王师傅")

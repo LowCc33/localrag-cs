@@ -1,0 +1,55 @@
+{
+  "basic_info": {
+    "shop_name": "",
+    "boss_name": "",
+    "years_in_business": 0,
+    "city": "",
+    "shop_location": "",
+    "wechat_id": "",
+    "after_sales_phone": ""
+  },
+  "pricing": {
+    "base_price_method": "",
+    "particle_board_price": 0,
+    "multi_layer_board_price": 0,
+    "osb_board_price": 0,
+    "ecological_board_price": 0,
+    "solid_wood_price": 0,
+    "drawer_price": 0,
+    "visible_panel_price": 0,
+    "handle_price": 0,
+    "measurement_fee": 0,
+    "installation_fee": "",
+    "delivery_fee": "",
+    "design_fee": ""
+  },
+  "materials": {
+    "default_board_brand": "",
+    "default_eco_level": "",
+    "default_edge_band": "",
+    "default_hardware_brand": "",
+    "available_boards": [],
+    "available_edge_bands": [],
+    "available_hardware": []
+  },
+  "service": {
+    "warranty_years": 0,
+    "production_cycle_days": "",
+    "install_days": "",
+    "design_days": "",
+    "deposit_ratio": "",
+    "refundable": true,
+    "rush_available": false,
+    "free_design": false,
+    "free_measurement": false,
+    "after_sales_scope": ""
+  },
+  "sales_script": {
+    "welcome_text": "",
+    "selling_points": [],
+    "concessions": [],
+    "urgency_factors": [],
+    "lead_hooks": [],
+    "community_cases": []
+  }
+}
