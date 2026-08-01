@@ -596,12 +596,25 @@ class CustomerServiceEngine:
             return "wechat"
 
         # 6. 地址/约量房/上门
+        # 注意：区分"主动留地址/约时间" vs "咨询量房的事"
+        # 有明显疑问词且没有主动留资信号的 → 不算留资
         address_keywords = [
             "地址", "上门", "量房", "过来看看", "到店", "去你们那",
             "什么时候有空", "约一下", "约个时间", "来我家", "我在",
             "我住", "小区", "来量房", "上门量", "免费量房",
+            "过去看看", "到店里", "你们店",
         ]
         if any(kw in text for kw in address_keywords):
+            # 排除纯咨询句式（有疑问词且没有留资信号）
+            question_words = ["吗", "怎么", "什么", "哪", "多少", "呢", "几", "要不要", "能不能"]
+            has_question = any(qw in text for qw in question_words)
+            # 主动留资信号：用户在提供信息，不是在问
+            leave_signals = ["我在", "我住", "我家在", "地址是", "给你地址", "过来量",
+                            "来量房吧", "约一下", "约个时间", "什么时候有空",
+                            "发地址", "地址给你", "我那", "小区叫"]
+            has_leave_signal = any(s in text for s in leave_signals)
+            if has_question and not has_leave_signal:
+                return None  # 是在咨询，不是留资
             return "address"
 
         return None
@@ -618,6 +631,65 @@ class CustomerServiceEngine:
         return any(kw in text for kw in bargain_keywords)
 
     # ---------- 4) LLM 4 分类意图识别（兜底用） ----------
+    # LLM意图分类缓存（类级内存字典，减少重复调用）
+    _intent_cache = {}
+
+    def classify_intent(self, text):
+        """
+        LLM 10分类意图路由（只分类不生成）
+        返回：1-10 的整数，失败返回 None（由调用方降级到关键词匹配）
+        1=price_inquiry 2=bargain 3=material_compare 4=material_detail
+        5=process_question 6=measurement_design 7=leave_contact
+        8=product_type 9=chitchat 10=unclear
+        """
+        import hashlib
+        import re
+
+        # 内存缓存
+        cache_key = hashlib.md5(text.strip().encode("utf-8")).hexdigest()
+        if cache_key in self._intent_cache:
+            return self._intent_cache[cache_key]
+
+        sys_prompt = (
+            "你是一个全屋定制客服的意图分类器。根据用户的问题，判断属于以下哪一类，只返回数字编号：\n"
+            "1. price_inquiry - 问价格、多少钱、怎么收费、价位、报价\n"
+            "2. bargain - 砍价、要优惠、便宜点、打折、能不能少、太贵了\n"
+            "3. material_compare - 材料对比、各有什么优缺点、哪个好、区别在哪、怎么选\n"
+            "4. material_detail - 问某种材料的详细信息、环保吗、质量怎么样、什么牌子\n"
+            "5. process_question - 工艺、封边、五金、安装、环保等级、施工\n"
+            "6. measurement_design - 量房、设计、出图、周期、多久能做好、工期\n"
+            "7. leave_contact - 留联系方式、约量房、加微信、留电话、留地址\n"
+            "8. product_type - 问产品种类、能做什么、有哪些柜子、业务范围\n"
+            "9. chitchat - 闲聊、打招呼、谢谢、好的、嗯、哦\n"
+            "10. unclear - 听不懂、不确定\n"
+            "只返回一个数字（1-10），不要解释，不要其他文字。"
+        )
+        try:
+            resp = requests.post(
+                API_URL,
+                headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": MODEL,
+                    "messages": [
+                        {"role": "system", "content": sys_prompt},
+                        {"role": "user", "content": f"用户说：{text}\n分类编号："},
+                    ],
+                    "temperature": 0,
+                },
+                timeout=5,
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+            m = re.search(r'10|[1-9]', content)
+            if m:
+                result = int(m.group())
+                self._intent_cache[cache_key] = result
+                return result
+            return None
+        except Exception as e:
+            print(f"[LLM意图分类降级] {e}")
+            return None
+
     def detect_intent(self, text):
         """调 LLM 做 4 分类意图识别，失败降级 chat"""
         sys_prompt = (
@@ -710,51 +782,153 @@ class CustomerServiceEngine:
             # 兜底话术
             return "lead_capture", "好的收到，我记下了，一会就联系您。"
 
-        # 1) 高频关键词前置命中（最高优先级，跳过工艺类和议价专属）
-        # 只要匹配到就返回，不管是不是议价相关（具体场景比通用议价更精准）
-        # 例外：已进入议价状态(bargain_step>=2)且是议价关键词 → 走议价升级，不走普通比价模板
+        # 1) LLM 意图路由（10分类）—— 判断用户问的是哪一类，决定走哪条路
+        # 已在议价中 → 直接交给议价状态机，不再重复分类（状态机内部自己处理）
+        # LLM失败 → 降级走关键词匹配（原来的逻辑）
+
+        intent_num = None
+        if self.bargain_step == 0:
+            # 只有不在议价中时才用LLM做入口分类
+            intent_num = self.classify_intent(text)
+
+        # 1.5 关键词检测（LLM降级备用 + 议价状态机内部判断使用）
         hot_result = self._match_hot_question(text)
         is_bargain = self._is_bargain_question(text)
         is_price_question = self._is_price_question(text)
-        has_size_clue = self._detect_order_size(text) is not None
 
-        # 已在议价后段(bargain_step>=4)且是砍价问题 → 跳过关键词命中，走议价升级
-        # 只有当命中的是比价类模板时才让位，具体场景类（环保/工艺/质保）优先级仍然最高
-        if hot_result is not None and self.bargain_step >= 4 and is_bargain:
-            bargain_related_cats = ['why_cheaper_elsewhere', 'same_board_diff_price', 'hidden_cost']
-            if hot_result[0] in bargain_related_cats:
-                hot_result = None  # 让给议价状态机处理
+        # ========== 分支1：已在议价中 → 直接走议价状态机 ==========
+        if self.bargain_step > 0:
+            stage, answer = self._handle_bargain(text)
+            self.llm_fallback_streak = 0
+            tag = f"bargain/{stage}"
+            # 保存上下文后返回
+            self.history.append({"user": text, "bot": answer})
+            self.history = self.history[-3:]
+            return tag, answer
 
+        # ========== 分支2：不在议价中 → 按LLM分类路由 ==========
+        # LLM分类成功（1-10）
+        if intent_num is not None:
+            # 7=留资（理论上前面的关键词检测已经处理了，这里做双保险）
+            if intent_num == 7:
+                self.llm_fallback_streak = 0
+                self.bargain_step = 0
+                self.bargain_pullback_count = 0
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == "lead_capture_success":
+                        tpl_list = hot_q.get("templates", [])
+                        if tpl_list:
+                            answer = self._render(random.choice(tpl_list))
+                            self.history.append({"user": text, "bot": answer})
+                            self.history = self.history[-3:]
+                            return "lead_capture", answer
+
+            # 1=问价格 / 2=砍价 → 进议价状态机
+            if intent_num in (1, 2):
+                stage, answer = self._handle_bargain(text)
+                self.llm_fallback_streak = 0
+                tag = f"bargain/{stage}"
+                self.history.append({"user": text, "bot": answer})
+                self.history = self.history[-3:]
+                return tag, answer
+
+            # 3=材料对比 → 走材料对比模板
+            if intent_num == 3:
+                self.llm_fallback_streak = 0
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == "material_compare":
+                        tpl_list = hot_q.get("templates", [])
+                        if tpl_list:
+                            answer = self._render(random.choice(tpl_list))
+                            tag = "material/compare"
+                            self.history.append({"user": text, "bot": answer})
+                            self.history = self.history[-3:]
+                            return tag, answer
+
+            # 4=材料细节 / 5=工艺问题 → 先关键词命中，答不上走知识库
+            if intent_num in (4, 5):
+                self.llm_fallback_streak = 0
+                # 先尝试关键词模板
+                if hot_result is not None:
+                    tag, answer = hot_result
+                    self.history.append({"user": text, "bot": answer})
+                    self.history = self.history[-3:]
+                    return tag, answer
+                # 关键词没命中 → 降级走原LLM四分类兜底（会走知识库检索）
+                # 交给下面的else分支
+
+            # 6=量房/设计 → 量房模板
+            if intent_num == 6:
+                self.llm_fallback_streak = 0
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == "measurement_design":
+                        tpl_list = hot_q.get("templates", [])
+                        if tpl_list:
+                            answer = self._render(random.choice(tpl_list))
+                            tag = "measurement/design"
+                            self.history.append({"user": text, "bot": answer})
+                            self.history = self.history[-3:]
+                            return tag, answer
+
+            # 8=产品类型 → 产品范围模板
+            if intent_num == 8:
+                self.llm_fallback_streak = 0
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == "product_type":
+                        tpl_list = hot_q.get("templates", [])
+                        if tpl_list:
+                            answer = self._render(random.choice(tpl_list))
+                            tag = "product/type"
+                            self.history.append({"user": text, "bot": answer})
+                            self.history = self.history[-3:]
+                            return tag, answer
+
+            # 9=闲聊 → 闲聊模板
+            if intent_num == 9:
+                self.llm_fallback_streak = 0
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == "chitchat":
+                        tpl_list = hot_q.get("templates", [])
+                        if tpl_list:
+                            answer = self._render(random.choice(tpl_list))
+                            tag = "chat/chitchat"
+                            self.history.append({"user": text, "bot": answer})
+                            self.history = self.history[-3:]
+                            return tag, answer
+
+            # 10=unclear / 其他 → 走原兜底逻辑（关键词→LLM四分类→盲区）
+
+        # ========== 分支3：LLM分类失败 或 unclear → 降级走原关键词+LLM兜底逻辑 ==========
+        # （保留原有的完整兜底链路，确保不丢客户）
+
+        # 关键词前置命中
         if hot_result is not None:
             self.llm_fallback_streak = 0
             tag, answer = hot_result
         else:
-            # 2) 工艺问题判断
+            # 工艺问题判断
             process_result = self._match_process_question(text)
             if process_result is not None:
                 self.llm_fallback_streak = 0
                 tag, answer = process_result
-            elif is_bargain or is_price_question or self.bargain_step > 0:
-                # 3) 议价多轮状态机
-                # 触发条件：① 有砍价关键词 ② 有问价关键词 ③ 或已在议价流程中
-                # 一旦进了议价流程就不跑丢，内部有降级逻辑
+            elif is_bargain or is_price_question:
+                # 议价状态机入口（关键词降级路径）
                 stage, answer = self._handle_bargain(text)
                 self.llm_fallback_streak = 0
                 tag = f"bargain/{stage}"
             else:
-                # 4) LLM 意图分类（兜底）
+                # LLM 四分类兜底（原来的逻辑）
                 intent = self.detect_intent(text)
                 self.llm_fallback_streak += 1
 
-                # 盲区兜底检测：连续2轮LLM兜底 或 偏门开放式问题
-                # 注意：只有真的走到LLM兜底分支了才判断盲区，不能放外面
+                # 盲区兜底检测
                 if self.llm_fallback_streak >= 2 or self._is_obscure_question(text):
                     unknown_pool = self.templates.get("unknown_question", [])
                     if unknown_pool:
                         answer = self._render(random.choice(unknown_pool))
                         tag = "fallback/unknown"
 
-                # 正常分类逻辑（盲区兜底没命中才走）
+                # 正常分类逻辑
                 if not answer:
                     if intent == "chat":
                         self.chat_streak += 1
@@ -762,7 +936,6 @@ class CustomerServiceEngine:
                         pool = self.templates["chat"][sub]
                         tag = f"chat/{sub}"
                     elif intent == "bargain":
-                        # LLM 识别为议价但关键词没命中，走状态机
                         stage, answer = self._handle_bargain(text)
                         self.llm_fallback_streak = 0
                         tag = f"bargain/{stage}_llm"
@@ -774,7 +947,7 @@ class CustomerServiceEngine:
                     if not answer:
                         answer = self._render(random.choice(pool))
 
-        # 5) 上下文记忆（最多 3 轮）
+            # 5) 上下文记忆（最多 3 轮）
         self.history.append({"user": text, "bot": answer})
         self.history = self.history[-3:]
 
