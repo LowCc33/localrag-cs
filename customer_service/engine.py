@@ -335,9 +335,11 @@ class CustomerServiceEngine:
         if material and size_val and self.bargain_step <= 2:
             self.bargain_step = 4
             self.bargain_pullback_count = 0
-            return size_val, self._render_bargain_template(
+            ans = self._render_bargain_template(
                 f"bargain_{size_val}", material=material, order_desc=order_desc
             )
+            ans = self._append_lead_hook(ans)
+            return size_val, ans
 
         # ========== Step 0：初次进入：先报价格区间 ==========
         if self.bargain_step == 0:
@@ -464,11 +466,13 @@ class CustomerServiceEngine:
             if size_val:
                 self.bargain_step = 4
                 self.bargain_pullback_count = 0
-                return size_val, self._render_bargain_template(
+                ans = self._render_bargain_template(
                     f"bargain_{size_val}",
                     material=material or self.config.get("default_material", "particle_board"),
                     order_desc=order_desc
                 )
+                ans = self._append_lead_hook(ans)
+                return size_val, ans
 
             # 其他情况 → 拉回正题
             self.bargain_pullback_count += 1
@@ -482,22 +486,26 @@ class CustomerServiceEngine:
             if size_val:
                 self.bargain_step = 4
                 self.bargain_pullback_count = 0
-                return size_val, self._render_bargain_template(
+                ans = self._render_bargain_template(
                     f"bargain_{size_val}",
                     material=material or self.config.get("default_material", "particle_board"),
                     order_desc=order_desc
                 )
+                ans = self._append_lead_hook(ans)
+                return size_val, ans
 
             # 说不知道/没量过 → 默认走中单（不跑丢），进step4
             unknown_keywords = ["不知道", "没量", "没算过", "不清楚", "大概吧", "还没", "不确定"]
             if any(kw in text for kw in unknown_keywords):
                 self.bargain_step = 4
                 self.bargain_pullback_count = 0
-                return "medium", self._render_bargain_template(
+                ans = self._render_bargain_template(
                     "bargain_medium",
                     material=material or self.config.get("default_material", "particle_board"),
                     order_desc="您这单"
                 )
+                ans = self._append_lead_hook(ans)
+                return "medium", ans
 
             # 不正面回答（让先报价）→ 拉回正题
             dodge_keywords = ["你先报", "先报个价", "合适再说", "你说说", "报个价"]
@@ -510,11 +518,13 @@ class CustomerServiceEngine:
             # 检测不出 → 默认走中单（不跑丢，继续推进）
             self.bargain_step = 4
             self.bargain_pullback_count = 0
-            return "medium", self._render_bargain_template(
+            ans = self._render_bargain_template(
                 "bargain_medium",
                 material=material or self.config.get("default_material", "particle_board"),
                 order_desc="您这单"
             )
+            ans = self._append_lead_hook(ans)
+            return "medium", ans
 
         # ========== Step 4 及以后 ==========
         # bargain_step >= 4
@@ -530,6 +540,20 @@ class CustomerServiceEngine:
             return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
         return "pullback", self._render_pullback_template(step=4)
 
+
+    def _append_lead_hook(self, answer):
+        """
+        在分档报价结尾追加留资钩子 + 引导话题（只在第一次报价时调用）
+        钩子随机选一条，引导话题固定
+        """
+        lead_hooks = [
+            "对了，您加我微信{{wechat_id}}吧，我给您发份详细报价单，您回去也好对比对比。",
+            "方便加个微信不{{wechat_id}}？后面有什么变动我直接跟您说。",
+            "您加微信{{wechat_id}}我把材料图和实景案例给您发过去，您先看看效果。",
+        ]
+        hook = self._render(random.choice(lead_hooks))
+        follow_up = "另外还有什么想了解的不？板材、工艺、安装啥的都行。"
+        return answer + "\n\n" + hook + "\n" + follow_up
 
     def _render_pullback_template(self, step):
         """
