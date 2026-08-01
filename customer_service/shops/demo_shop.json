@@ -58,7 +58,16 @@
     "rush_available": true,
     "free_design": true,
     "free_measurement": true,
-    "after_sales_scope": "柜体5年质保，五金终身质保，终身维护"
+    "after_sales_scope": "柜体5年质保，五金终身质保，终身维护",
+    "production": {
+      "design_output_per_day": 30,
+      "install_output_per_day": 20,
+      "chai_dan_days": 2,
+      "production_base_days": 15,
+      "production_per_10sqm_days": 1,
+      "design_min_days": 3,
+      "install_min_days": 1
+    }
   },
   "sales_script": {
     "welcome_text": "您好！我是合肥尚美全屋定制的客服小张，很高兴为您服务。请问您是想咨询柜子定制吗？😊",

@@ -44,7 +44,16 @@
     "rush_available": false,
     "free_design": false,
     "free_measurement": false,
-    "after_sales_scope": ""
+    "after_sales_scope": "",
+    "production": {
+      "design_output_per_day": 30,
+      "install_output_per_day": 20,
+      "chai_dan_days": 2,
+      "production_base_days": 15,
+      "production_per_10sqm_days": 1,
+      "design_min_days": 3,
+      "install_min_days": 1
+    }
   },
   "sales_script": {
     "welcome_text": "",

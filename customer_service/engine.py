@@ -274,6 +274,60 @@ class CustomerServiceEngine:
         else:
             return "您这单"
 
+    def _calc_delivery_days(self, area=None):
+        """
+        动态计算工期（天）
+        能从历史里拿到面积就用真实面积算，拿不到按20平（中单）估算
+        返回：dict 含 design/chai/production/install/total
+        """
+        import math
+
+        # 从历史里找面积
+        if area is None:
+            for h in reversed(self.history):
+                s_val, s_type, s_raw = self._detect_order_size(h["user"])
+                if s_val and s_type == "area" and s_raw:
+                    try:
+                        area = float(s_raw)
+                        break
+                    except ValueError:
+                        pass
+        # 还是没有就按20平估算
+        if area is None:
+            area = 20
+
+        prod_config = self.config.get("production", {})
+        if not prod_config:
+            # 配置不全就返回默认
+            return {"design": 3, "chai": 2, "production": 15, "install": 1, "total": 21, "area": area}
+
+        design_output = prod_config.get("design_output_per_day", 30)
+        install_output = prod_config.get("install_output_per_day", 20)
+        chai_days = prod_config.get("chai_dan_days", 2)
+        prod_base = prod_config.get("production_base_days", 15)
+        prod_per_10 = prod_config.get("production_per_10sqm_days", 1)
+        design_min = prod_config.get("design_min_days", 3)
+        install_min = prod_config.get("install_min_days", 1)
+
+        design_days = max(design_min, math.ceil(area / design_output))
+        production_days = prod_base + (area // 10) * prod_per_10
+        install_days = max(install_min, math.ceil(area / install_output))
+        total = design_days + chai_days + production_days + install_days
+
+        return {
+            "design": design_days,
+            "chai": chai_days,
+            "production": production_days,
+            "install": install_days,
+            "total": total,
+            "area": area,
+        }
+
+    def _format_delivery_text(self, days_info):
+        """把工期计算结果格式化成口语化回答"""
+        d = days_info
+        return f"从签合同到装完，大概{d['total']}天左右。设计{d['design']}天，拆单排产{d['chai']}天，生产{d['production']}天，安装{d['install']}天。"
+
     def _get_order_info(self):
         """
         从历史记录里找最近的订单信息，用于模板渲染
@@ -552,7 +606,7 @@ class CustomerServiceEngine:
             "您加微信{{wechat_id}}我把材料图和实景案例给您发过去，您先看看效果。",
         ]
         hook = self._render(random.choice(lead_hooks))
-        follow_up = "对了，还有什么想了解的不？板材、工艺、安装啥的都行。"
+        follow_up = "有什么想了解的随时说哈，板材、工艺、安装啥的都行。"
         return answer + "\n\n" + hook + "\n" + follow_up
 
     def _render_pullback_template(self, step):
@@ -721,6 +775,19 @@ class CustomerServiceEngine:
             "我先想想", "我先考虑", "先想一下", "再想想",
         ]
         return any(kw in text for kw in end_keywords)
+
+    def _is_soft_close(self, text):
+        """
+        观望收尾检测：用户说考虑考虑/再想想等观望类话术
+        （不是真的不聊了，是暂时观望，需要软挽留）
+        """
+        soft_close_keywords = [
+            "考虑考虑", "再想想", "我先看看", "回去想想", "再比较比较",
+            "再对比一下", "先不着急", "想想再说", "回家商量", "跟家人商量",
+            "再了解了解", "先了解一下", "考虑一下再说", "考虑下再说",
+            "我再想想", "先考虑考虑", "考虑好了找你", "等我消息",
+        ]
+        return any(kw in text for kw in soft_close_keywords)
 
     def _detect_contact_info(self, text):
         """
@@ -1020,6 +1087,24 @@ class CustomerServiceEngine:
             # 兜底话术
             return "lead_capture", "好的收到，我记下了，一会就联系您。"
 
+        # 0.5) 观望收尾检测（优先级比状态机高，软挽留+加微信）
+        if self._is_soft_close(text):
+            self.llm_fallback_streak = 0
+            # 不重置状态机变量，用户回头还能接着聊
+            for hot_q in self.templates.get("hot_questions", []):
+                if hot_q.get("category") == "soft_close":
+                    tpl_list = hot_q.get("templates", [])
+                    if tpl_list:
+                        answer = self._render(random.choice(tpl_list))
+                        self.history.append({"user": text, "bot": answer})
+                        self.history = self.history[-3:]
+                        return "soft_close", answer
+            # 兜底
+            answer = f"行，您慢慢考虑。加我微信{self.config.get('wechat_id', '')}，有啥问题随时问我。"
+            self.history.append({"user": text, "bot": answer})
+            self.history = self.history[-3:]
+            return "soft_close", answer
+
         # 1) LLM 意图路由（10分类）—— 判断用户问的是哪一类，决定走哪条路
         # 已在议价中 → 直接交给议价状态机，不再重复分类（状态机内部自己处理）
         # LLM失败 → 降级走关键词匹配（原来的逻辑）
@@ -1103,7 +1188,13 @@ class CustomerServiceEngine:
                     if hot_q.get("category") == "measurement_design":
                         tpl_list = hot_q.get("templates", [])
                         if tpl_list:
-                            answer = self._render(random.choice(tpl_list))
+                            days = self._calc_delivery_days()
+                            tpl = random.choice(tpl_list)
+                            tpl = tpl.replace("{{total_days}}", str(days["total"]))
+                            tpl = tpl.replace("{{design_days}}", str(days["design"]))
+                            tpl = tpl.replace("{{production_days}}", str(days["production"]))
+                            tpl = tpl.replace("{{install_days}}", str(days["install"]))
+                            answer = self._render(tpl)
                             tag = "measurement/design"
                             self.history.append({"user": text, "bot": answer})
                             self.history = self.history[-3:]

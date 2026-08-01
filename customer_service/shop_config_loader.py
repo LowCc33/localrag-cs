@@ -118,6 +118,17 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
             "after_sales_phone": basic.get("after_sales_phone", ""),
         },
 
+        # === 工期动态计算参数 ===
+        "production": service.get("production", {
+            "design_output_per_day": 30,
+            "install_output_per_day": 20,
+            "chai_dan_days": 2,
+            "production_base_days": 15,
+            "production_per_10sqm_days": 1,
+            "design_min_days": 3,
+            "install_min_days": 1,
+        }),
+
         # === 工期 ===
         "production_cycle": {
             "design_days": str(service.get("design_days", "7")),

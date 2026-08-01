@@ -67,6 +67,16 @@ production_cycle:
   rush_days: "25"         # 加急最快天数
   repair_days: "7"        # 补件周期（天）
 
+# 工期动态计算参数（按面积计算真实工期）
+production:
+  design_output_per_day: 30    # 设计师1天出图平方数
+  install_output_per_day: 20   # 2个安装师傅1天安装平方数
+  chai_dan_days: 2             # 拆单排产天数（固定）
+  production_base_days: 15     # 生产基础天数（保底）
+  production_per_10sqm_days: 1 # 每增加10平方，生产多加1天
+  design_min_days: 3           # 设计最少3天
+  install_min_days: 1          # 安装最少1天
+
 # ==================== 品牌信任配置 ====================
 trust_points:
   factory_location: "余杭区仓前工业园"   # 工厂地址
