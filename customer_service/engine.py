@@ -552,7 +552,7 @@ class CustomerServiceEngine:
             "您加微信{{wechat_id}}我把材料图和实景案例给您发过去，您先看看效果。",
         ]
         hook = self._render(random.choice(lead_hooks))
-        follow_up = "另外还有什么想了解的不？板材、工艺、安装啥的都行。"
+        follow_up = "对了，还有什么想了解的不？板材、工艺、安装啥的都行。"
         return answer + "\n\n" + hook + "\n" + follow_up
 
     def _render_pullback_template(self, step):
