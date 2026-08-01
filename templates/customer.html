@@ -451,6 +451,9 @@
         let sessionId = 'web_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
         let isLoading = false;
 
+        // 从URL获取shop_id参数
+        const shopId = new URLSearchParams(window.location.search).get('shop_id') || null;
+
         // DOM 元素
         const chatArea = document.getElementById('chat-area');
         const chatContainer = document.getElementById('chat-container');
@@ -464,8 +467,9 @@
         // ==================== 初始化 ====================
         async function init() {
             try {
-                // 加载欢迎语和商家信息
-                const resp = await fetch(API_BASE + '/welcome');
+                // 加载欢迎语和商家信息（带上 shop_id 参数）
+                const welcomeUrl = API_BASE + '/welcome' + (shopId ? '?shop_id=' + encodeURIComponent(shopId) : '');
+                const resp = await fetch(welcomeUrl);
                 const data = await resp.json();
                 if (data.shop_name) {
                     shopNameEl.textContent = data.shop_name;
@@ -513,13 +517,14 @@
             const { contentEl } = appendAiMessage('');
 
             try {
-                // 调用流式接口
+                // 调用流式接口（带上 shop_id）
                 const resp = await fetch(API_BASE + '/ask/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         question: text,
                         session_id: sessionId,
+                        shop_id: shopId,
                     }),
                 });
 
@@ -579,6 +584,7 @@
                         body: JSON.stringify({
                             question: text,
                             session_id: sessionId,
+                            shop_id: shopId,
                         }),
                     });
                     const data = await fallbackResp.json();
