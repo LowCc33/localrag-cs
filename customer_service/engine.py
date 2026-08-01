@@ -286,6 +286,38 @@ class CustomerServiceEngine:
                     "bargain_material_price", material=material
                 )
 
+            # 说了某个房间/场景 → 场景化推荐 + 进step2（相当于帮用户选了推荐材料）
+            room_type = self._detect_room_type(text)
+            if room_type:
+                # 场景推荐对应的默认材料
+                room_default_materials = {
+                    "kids_room": "ecological_board",    # 儿童房→生态板
+                    "kitchen": "multi_layer_board",    # 厨房→多层板
+                    "bathroom": "multi_layer_board",   # 卫生间/阳台→多层板
+                    "bedroom": "particle_board",        # 卧室→颗粒板（默认）
+                    "shoe_cabinet": "particle_board",   # 鞋柜等→颗粒板
+                    "tatami": "ecological_board",       # 榻榻米→生态板
+                }
+                default_mat = room_default_materials.get(
+                    room_type,
+                    self.config.get("default_material", "particle_board")
+                )
+                # 先渲染场景推荐模板
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == f"material_recommend_{room_type}":
+                        tpl_list = hot_q.get("templates", [])
+                        if tpl_list:
+                            recommend_text = self._render(tpl_list[0])
+                            self.bargain_step = 2
+                            self.bargain_pullback_count = 0
+                            return f"recommend/{room_type}", recommend_text
+                # 模板没找到就降级用材料报价
+                self.bargain_step = 2
+                self.bargain_pullback_count = 0
+                return "material_price", self._render_bargain_template(
+                    "bargain_material_price", material=default_mat
+                )
+
             # 说了性价比偏好 → 推荐颗粒板
             if preference == "cost_effective":
                 self.bargain_step = 2
@@ -510,6 +542,42 @@ class CustomerServiceEngine:
                 best_material = mat_key
 
         return best_material if best_count > 0 else None
+
+    def _detect_room_type(self, text):
+        """
+        检测用户说的是哪个房间/使用场景（场景化材料推荐用）
+        返回：kids_room / kitchen / bathroom / bedroom / shoe_cabinet / tatami / None
+        优先级高的在前（比如"儿童衣柜"应该命中儿童房而不是卧室）
+        """
+        # 按优先级排序（更具体的场景放前面）
+        room_patterns = [
+            ("kids_room", [
+                "儿童房", "小孩房", "宝宝房", "孩子房间", "儿童衣柜", "孩子用",
+                "儿童", "小孩", "宝宝",
+            ]),
+            ("tatami", [
+                "榻榻米", "地台", "踏踏米", "和室",
+            ]),
+            ("kitchen", [
+                "厨房", "橱柜", "厨柜", "厨房柜子", "灶台", "吊柜",
+            ]),
+            ("bathroom", [
+                "卫生间", "洗手间", "卫浴柜", "浴室柜", "洗手台",
+                "阳台", "阳台柜", "洗衣柜", "洗衣机柜",
+            ]),
+            ("shoe_cabinet", [
+                "鞋柜", "餐边柜", "玄关柜", "酒柜", "门厅柜", "入户柜",
+            ]),
+            ("bedroom", [
+                "卧室", "主卧", "次卧", "衣柜", "大衣柜", "衣帽间",
+                "大衣橱", "衣橱",
+            ]),
+        ]
+
+        for room_key, keywords in room_patterns:
+            if any(kw in text for kw in keywords):
+                return room_key
+        return None
 
     def _detect_preference_type(self, text):
         """
