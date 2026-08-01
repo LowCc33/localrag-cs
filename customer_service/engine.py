@@ -131,8 +131,21 @@ class CustomerServiceEngine:
         if best_match is not None:
             templates_list = best_match.get("templates", [])
             if templates_list:
-                answer = self._render(random.choice(templates_list))
-                return best_match.get("category", "hot_question"), answer
+                category = best_match.get("category", "hot_question")
+                template_str = random.choice(templates_list)
+                # 工期类问题 → 动态计算天数并注入变量
+                if category == "total_cycle":
+                    days = self._calc_delivery_days()
+                    extra = {
+                        "total_days": str(days["total"]),
+                        "design_days": str(days["design"]),
+                        "production_days": str(days["production"]),
+                        "install_days": str(days["install"]),
+                    }
+                    answer = self._render_with_extra(template_str, extra)
+                else:
+                    answer = self._render(template_str)
+                return category, answer
         return None
 
     # ---------- 2) 工艺能力判断 ----------
@@ -309,9 +322,9 @@ class CustomerServiceEngine:
         design_min = prod_config.get("design_min_days", 3)
         install_min = prod_config.get("install_min_days", 1)
 
-        design_days = max(design_min, math.ceil(area / design_output))
-        production_days = prod_base + (area // 10) * prod_per_10
-        install_days = max(install_min, math.ceil(area / install_output))
+        design_days = max(design_min, math.ceil(int(area) / design_output))
+        production_days = prod_base + (int(area) // 10) * prod_per_10
+        install_days = max(install_min, math.ceil(int(area) / install_output))
         total = design_days + chai_days + production_days + install_days
 
         return {
@@ -448,7 +461,9 @@ class CustomerServiceEngine:
                 self.bargain_step = 2
                 self.bargain_pullback_count = 0
                 return "material_price", self._render_bargain_template(
-                    "bargain_material_price", material="particle_board"
+                    "bargain_recommend_material",
+                    material="particle_board",
+                    extra_vars={"recommend_reason": "性价比"}
                 )
 
             # 说了环保偏好 → 推荐生态板
@@ -456,7 +471,9 @@ class CustomerServiceEngine:
                 self.bargain_step = 2
                 self.bargain_pullback_count = 0
                 return "material_price", self._render_bargain_template(
-                    "bargain_material_price", material="ecological_board"
+                    "bargain_recommend_material",
+                    material="ecological_board",
+                    extra_vars={"recommend_reason": "环保"}
                 )
 
             # 平衡型/让推荐 → 推荐主推款（main_material）
@@ -465,7 +482,9 @@ class CustomerServiceEngine:
                 self.bargain_step = 2
                 self.bargain_pullback_count = 0
                 return "material_price", self._render_bargain_template(
-                    "bargain_material_price", material=main_mat
+                    "bargain_recommend_material",
+                    material=main_mat,
+                    extra_vars={"recommend_reason": "综合考虑"}
                 )
 
             # 只说了面积/数量没说材料 → 按默认材料报价，进step2
@@ -624,11 +643,12 @@ class CustomerServiceEngine:
         # 兜底
         return "咱先把这事定下来？"
 
-    def _render_bargain_template(self, category_name, material=None, order_desc=None):
+    def _render_bargain_template(self, category_name, material=None, order_desc=None, extra_vars=None):
         """
         从 hot_questions 中找到指定分类的模板，随机选一个渲染
         material 参数：选中的材料key，用于计算 material_name/material_price 等变量
         order_desc 参数：订单描述字符串，用于 {{order_desc}} 占位符
+        extra_vars 参数：额外的模板变量字典
         """
         for hot_q in self.templates.get("hot_questions", []):
             if hot_q.get("category") == category_name:
@@ -636,22 +656,24 @@ class CustomerServiceEngine:
                 if templates_list:
                     template_str = random.choice(templates_list)
                     # 如果有材料信息，组装额外变量
-                    extra_vars = {}
+                    vars_dict = {}
+                    if extra_vars:
+                        vars_dict.update(extra_vars)
                     if order_desc:
-                        extra_vars["order_desc"] = order_desc
+                        vars_dict["order_desc"] = order_desc
                     if material:
-                        extra_vars["material_name"] = get_material_name(material)
-                        extra_vars["material_price"] = get_material_price(self.config, material)
-                        extra_vars["price_method"] = self.config.get("_base_price_method", "投影面积")
-                        extra_vars["hardware"] = self.config.get("hardware_brand", "")
-                        extra_vars["edge_band"] = self.config.get("edge_band", "")
-                        extra_vars["price_range_low"], extra_vars["price_range_high"] = get_price_range(self.config)
-                        extra_vars["materials_list"] = get_materials_list_text(self.config)
+                        vars_dict["material_name"] = get_material_name(material)
+                        vars_dict["material_price"] = get_material_price(self.config, material)
+                        vars_dict["price_method"] = self.config.get("_base_price_method", "投影面积")
+                        vars_dict["hardware"] = self.config.get("hardware_brand", "")
+                        vars_dict["edge_band"] = self.config.get("edge_band", "")
+                        vars_dict["price_range_low"], vars_dict["price_range_high"] = get_price_range(self.config)
+                        vars_dict["materials_list"] = get_materials_list_text(self.config)
                     # 价格区间模板也需要这些变量
                     if category_name == "bargain_price_range":
-                        extra_vars["price_range_low"], extra_vars["price_range_high"] = get_price_range(self.config)
-                        extra_vars["materials_list"] = get_materials_list_text(self.config)
-                    return self._render_with_extra(template_str, extra_vars)
+                        vars_dict["price_range_low"], vars_dict["price_range_high"] = get_price_range(self.config)
+                        vars_dict["materials_list"] = get_materials_list_text(self.config)
+                    return self._render_with_extra(template_str, vars_dict)
         # 找不到兜底
         return "价格好商量，您具体有什么需求？"
 

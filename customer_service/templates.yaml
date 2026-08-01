@@ -80,6 +80,15 @@ hot_questions:
       - "{{material_name}}一平{{material_price}}，按{{price_method}}算。五金用的{{hardware}}，封边是{{edge_band}}，这配置在同价位里很能打了。"
       - "您选的{{material_name}}是{{material_price}}一平，计价方式是{{price_method}}。标配{{hardware}}，封边{{edge_band}}，您看这配置行吗？"
 
+  # 0.2.5 推荐材料话术（系统根据偏好推荐时用，区别于用户自己选的）
+  - category: bargain_recommend_material
+    bargain_only: true
+    keywords: []
+    templates:
+      - "我首推{{material_name}}，{{material_price}}一平，性价比最高。{{price_method}}计价，标配{{hardware}}五金、{{edge_band}}封边，该有的都有。"
+      - "追求{{recommend_reason}}的话选{{material_name}}最划算，{{material_price}}一平。五金{{hardware}}，封边{{edge_band}}，配置很扎实。"
+      - "选{{material_name}}就挺合适的，{{material_price}}一平。按{{price_method}}算，标配的五金和封边都不差，家用完全够。"
+
   # 0.3 拉回正题话术（议价各阶段通用，按step选用）
   - category: bargain_pullback
     bargain_only: true
@@ -665,8 +674,8 @@ hot_questions:
       - 周期
       - 多长时间能做好
     templates:
-      - "设计周期{{production_cycle.design_days}}天，生产{{production_cycle.production_days}}天，安装{{production_cycle.install_days}}天。加起来大概一个半月左右，具体看您方案复杂程度。"
-      - "从签合同到装完，一般{{production_cycle.production_days}}天左右。设计{{production_cycle.design_days}}天，生产周期长一点，安装很快，{{production_cycle.install_days}}天就搞定了。"
+      - "设计周期{{design_days}}天，生产{{production_days}}天，安装{{install_days}}天。从签合同到装完大概{{total_days}}天左右，具体看您方案复杂程度。"
+      - "从签合同到装完，大概{{total_days}}天左右。设计{{design_days}}天，生产周期长一点，安装很快，{{install_days}}天就搞定了。"
 
   # 5.2 能不能加急
   - category: can_rush
