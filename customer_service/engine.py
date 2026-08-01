@@ -373,32 +373,33 @@ class CustomerServiceEngine:
                 intent = self.detect_intent(text)
                 self.llm_fallback_streak += 1
 
-        # 盲区兜底检测：连续2轮LLM兜底 或 偏门开放式问题
-        if self.llm_fallback_streak >= 2 or self._is_obscure_question(text):
-            unknown_pool = self.templates.get("unknown_question", [])
-            if unknown_pool:
-                answer = self._render(random.choice(unknown_pool))
-                tag = "fallback/unknown"
+                # 盲区兜底检测：连续2轮LLM兜底 或 偏门开放式问题
+                # 注意：只有真的走到LLM兜底分支了才判断盲区，不能放外面
+                if self.llm_fallback_streak >= 2 or self._is_obscure_question(text):
+                    unknown_pool = self.templates.get("unknown_question", [])
+                    if unknown_pool:
+                        answer = self._render(random.choice(unknown_pool))
+                        tag = "fallback/unknown"
 
-        # 正常分类逻辑（盲区兜底没命中才走）
-        if not answer:
-            if intent == "chat":
-                self.chat_streak += 1
-                sub = "soft_end" if self.chat_streak >= 2 else self._sub_chat_type(text)
-                pool = self.templates["chat"][sub]
-                tag = f"chat/{sub}"
-            elif intent == "bargain":
-                # LLM 识别为议价但关键词没命中，走状态机
-                stage, answer = self._handle_bargain(text)
-                self.llm_fallback_streak = 0
-                tag = f"bargain/{stage}_llm"
-            else:
-                self.chat_streak = 0
-                pool = self.templates[intent]
-                tag = intent
+                # 正常分类逻辑（盲区兜底没命中才走）
+                if not answer:
+                    if intent == "chat":
+                        self.chat_streak += 1
+                        sub = "soft_end" if self.chat_streak >= 2 else self._sub_chat_type(text)
+                        pool = self.templates["chat"][sub]
+                        tag = f"chat/{sub}"
+                    elif intent == "bargain":
+                        # LLM 识别为议价但关键词没命中，走状态机
+                        stage, answer = self._handle_bargain(text)
+                        self.llm_fallback_streak = 0
+                        tag = f"bargain/{stage}_llm"
+                    else:
+                        self.chat_streak = 0
+                        pool = self.templates[intent]
+                        tag = intent
 
-            if not answer:
-                answer = self._render(random.choice(pool))
+                    if not answer:
+                        answer = self._render(random.choice(pool))
 
         # 5) 上下文记忆（最多 3 轮）
         self.history.append({"user": text, "bot": answer})
