@@ -631,8 +631,29 @@ class CustomerServiceEngine:
         return any(kw in text for kw in bargain_keywords)
 
     # ---------- 4) LLM 4 分类意图识别（兜底用） ----------
-    # LLM意图分类缓存（类级内存字典，减少重复调用）
-    _intent_cache = {}
+    def _get_redis(self):
+        """获取Redis连接，单例模式，连接失败返回None（降级）"""
+        if hasattr(self, '_redis_client') and self._redis_client is not None:
+            return self._redis_client
+        try:
+            import redis as redis_lib
+            from config import CACHE_REDIS_HOST, CACHE_REDIS_PORT, CACHE_REDIS_DB, CACHE_REDIS_PASSWORD, CACHE_REDIS_TIMEOUT
+            self._redis_client = redis_lib.Redis(
+                host=CACHE_REDIS_HOST,
+                port=CACHE_REDIS_PORT,
+                db=CACHE_REDIS_DB,
+                password=CACHE_REDIS_PASSWORD,
+                socket_timeout=CACHE_REDIS_TIMEOUT,
+                socket_connect_timeout=CACHE_REDIS_TIMEOUT,
+                decode_responses=True,
+            )
+            # 测试连接
+            self._redis_client.ping()
+            return self._redis_client
+        except Exception as e:
+            print(f"[Redis连接失败，意图分类缓存降级] {e}")
+            self._redis_client = None
+            return None
 
     def classify_intent(self, text):
         """
@@ -641,14 +662,21 @@ class CustomerServiceEngine:
         1=price_inquiry 2=bargain 3=material_compare 4=material_detail
         5=process_question 6=measurement_design 7=leave_contact
         8=product_type 9=chitchat 10=unclear
+        缓存：Redis，key=intent:{md5(text)}，过期7天；Redis不可用时自动降级不缓存
         """
         import hashlib
         import re
 
-        # 内存缓存
-        cache_key = hashlib.md5(text.strip().encode("utf-8")).hexdigest()
-        if cache_key in self._intent_cache:
-            return self._intent_cache[cache_key]
+        # Redis 缓存
+        cache_key = "intent:" + hashlib.md5(text.strip().encode("utf-8")).hexdigest()
+        redis_client = self._get_redis()
+        if redis_client:
+            try:
+                cached = redis_client.get(cache_key)
+                if cached:
+                    return int(cached)
+            except Exception:
+                pass  # Redis挂了也不影响主流程
 
         sys_prompt = (
             "你是一个全屋定制客服的意图分类器。根据用户的问题，判断属于以下哪一类，只返回数字编号：\n"
@@ -683,7 +711,12 @@ class CustomerServiceEngine:
             m = re.search(r'10|[1-9]', content)
             if m:
                 result = int(m.group())
-                self._intent_cache[cache_key] = result
+                # 写入Redis缓存，过期7天
+                if redis_client:
+                    try:
+                        redis_client.setex(cache_key, 7 * 24 * 3600, result)
+                    except Exception:
+                        pass
                 return result
             return None
         except Exception as e:
