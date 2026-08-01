@@ -363,9 +363,18 @@ class CustomerServiceEngine:
 
         # 1) 高频关键词前置命中（最高优先级，跳过工艺类和议价专属）
         # 只要匹配到就返回，不管是不是议价相关（具体场景比通用议价更精准）
+        # 例外：已进入议价状态(bargain_step>=2)且是议价关键词 → 走议价升级，不走普通比价模板
         hot_result = self._match_hot_question(text)
         is_bargain = self._is_bargain_question(text)
         has_size_clue = self._detect_order_size(text) is not None
+
+        # 已在议价分档阶段(bargain_step>=2)且是议价相关问题 → 跳过关键词命中，走议价升级
+        if hot_result is not None and self.bargain_step >= 2 and is_bargain:
+            # 只有当命中的是比价类（而不是更具体的场景类）时才让位给议价升级
+            # 具体场景类（如环保/工艺/质保）优先级仍然高于议价
+            bargain_related_cats = ['why_cheaper_elsewhere', 'same_board_diff_price', 'hidden_cost']
+            if hot_result[0] in bargain_related_cats:
+                hot_result = None  # 让给议价状态机处理
 
         if hot_result is not None:
             self.llm_fallback_streak = 0
