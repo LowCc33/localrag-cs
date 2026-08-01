@@ -61,6 +61,11 @@ class CustomerServiceEngine:
         每次渲染前组装变量：硬参数 + 嵌套配置对象 + 4个随机抽取池
         嵌套对象直接传入，模板里用点号访问（如 {{payment_terms.deposit}}）
         """
+        # 工期动态计算（懒加载，算一次就够了）
+        if not hasattr(self, "_cached_delivery_days"):
+            self._cached_delivery_days = self._calc_delivery_days()
+        days = self._cached_delivery_days
+
         return {
             # —— 店铺基础信息 ——
             "shop_name": self.config["shop_name"],
@@ -87,6 +92,11 @@ class CustomerServiceEngine:
             "hook": self._render_lead_hook(),
             # —— 兼容旧模板的 warranty 字段 ——
             "warranty": self.config.get("warranty", ""),
+            # —— 工期动态计算（默认估算，任何模板都能安全用，不会空值）——
+            "total_days": str(days["total"]),
+            "design_days": str(days["design"]),
+            "production_days": str(days["production"]),
+            "install_days": str(days["install"]),
         }
 
     def _render_lead_hook(self):
@@ -291,11 +301,12 @@ class CustomerServiceEngine:
         """
         动态计算工期（天）
         能从历史里拿到面积就用真实面积算，拿不到按20平（中单）估算
-        返回：dict 含 design/chai/production/install/total
+        柜子数量按1柜≈2平换算，全屋按30平算
+        返回：dict 含 design/chai/production/install/total/area
         """
         import math
 
-        # 从历史里找面积
+        # 从历史里找面积/柜子数量/全屋
         if area is None:
             for h in reversed(self.history):
                 s_val, s_type, s_raw = self._detect_order_size(h["user"])
@@ -305,6 +316,17 @@ class CustomerServiceEngine:
                         break
                     except ValueError:
                         pass
+                # 柜子数量 → 按1柜≈2平换算
+                elif s_val and s_type == "count" and s_raw:
+                    try:
+                        area = float(s_raw) * 2
+                        break
+                    except ValueError:
+                        pass
+                # 全屋 → 按30平算
+                elif s_type == "whole_house":
+                    area = 30
+                    break
         # 还是没有就按20平估算
         if area is None:
             area = 20
@@ -466,17 +488,18 @@ class CustomerServiceEngine:
                     extra_vars={"recommend_reason": "性价比"}
                 )
 
-            # 说了环保偏好 → 推荐生态板
+            # 说了环保偏好 → 推荐生态板（只用前3条通用模板，避免"最便宜的"违和）
             if preference == "eco_friendly":
                 self.bargain_step = 2
                 self.bargain_pullback_count = 0
                 return "material_price", self._render_bargain_template(
                     "bargain_recommend_material",
                     material="ecological_board",
-                    extra_vars={"recommend_reason": "环保"}
+                    extra_vars={"recommend_reason": "环保"},
+                    max_index=3
                 )
 
-            # 平衡型/让推荐 → 推荐主推款（main_material）
+            # 平衡型/让推荐 → 推荐主推款（main_material，只用前3条通用模板）
             if preference == "balanced":
                 main_mat = self.config.get("main_material", "multi_layer_board")
                 self.bargain_step = 2
@@ -484,7 +507,8 @@ class CustomerServiceEngine:
                 return "material_price", self._render_bargain_template(
                     "bargain_recommend_material",
                     material=main_mat,
-                    extra_vars={"recommend_reason": "综合考虑"}
+                    extra_vars={"recommend_reason": "综合考虑"},
+                    max_index=3
                 )
 
             # 只说了面积/数量没说材料 → 按默认材料报价，进step2
@@ -643,18 +667,23 @@ class CustomerServiceEngine:
         # 兜底
         return "咱先把这事定下来？"
 
-    def _render_bargain_template(self, category_name, material=None, order_desc=None, extra_vars=None):
+    def _render_bargain_template(self, category_name, material=None, order_desc=None, extra_vars=None, max_index=None):
         """
         从 hot_questions 中找到指定分类的模板，随机选一个渲染
         material 参数：选中的材料key，用于计算 material_name/material_price 等变量
         order_desc 参数：订单描述字符串，用于 {{order_desc}} 占位符
         extra_vars 参数：额外的模板变量字典
+        max_index 参数：只从前 N 条模板里随机选（用于不同场景选不同话术池）
         """
         for hot_q in self.templates.get("hot_questions", []):
             if hot_q.get("category") == category_name:
                 templates_list = hot_q.get("templates", [])
                 if templates_list:
-                    template_str = random.choice(templates_list)
+                    # max_index 限制选取范围（从前面几条里选）
+                    if max_index and max_index < len(templates_list):
+                        template_str = random.choice(templates_list[:max_index])
+                    else:
+                        template_str = random.choice(templates_list)
                     # 如果有材料信息，组装额外变量
                     vars_dict = {}
                     if extra_vars:

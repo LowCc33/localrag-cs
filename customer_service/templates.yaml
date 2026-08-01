@@ -88,6 +88,9 @@ hot_questions:
       - "我首推{{material_name}}，{{material_price}}一平，性价比最高。{{price_method}}计价，标配{{hardware}}五金、{{edge_band}}封边，该有的都有。"
       - "追求{{recommend_reason}}的话选{{material_name}}最划算，{{material_price}}一平。五金{{hardware}}，封边{{edge_band}}，配置很扎实。"
       - "选{{material_name}}就挺合适的，{{material_price}}一平。按{{price_method}}算，标配的五金和封边都不差，家用完全够。"
+      - "最便宜的是{{material_name}}，{{material_price}}一平，性价比很高，普通家用完全够了。"
+      - "想要便宜的话选{{material_name}}就行，{{material_price}}一平，我们用的{{board_brand}}的板，质量也不差。"
+      - "{{material_name}}最实惠，{{material_price}}一平，标配{{hardware}}五金和{{edge_band}}封边，这个价位里配置算好的。"
 
   # 0.3 拉回正题话术（议价各阶段通用，按step选用）
   - category: bargain_pullback
