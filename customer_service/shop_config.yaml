@@ -12,6 +12,7 @@ city: 杭州
 shop_location: 杭州市余杭区建材市场三楼A区
 wechat_id: "13800138000"   # 留资/兜底用的微信号
 default_material: particle_board   # 默认材料
+main_material: multi_layer_board     # 主推款（用户让推荐时用）
 
 # ==================== 价格表（供议价状态机使用） ====================
 _pricing:

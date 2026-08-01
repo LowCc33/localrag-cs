@@ -7,7 +7,8 @@
     "shop_location": "合肥市包河区望湖美家居二楼B区218号",
     "wechat_id": "13955118888",
     "after_sales_phone": "0551-6555-8888",
-    "default_material": "particle_board"
+    "default_material": "particle_board",
+    "main_material": "multi_layer_board"
   },
   "pricing": {
     "base_price_method": "投影面积",

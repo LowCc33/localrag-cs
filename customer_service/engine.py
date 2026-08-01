@@ -50,7 +50,9 @@ class CustomerServiceEngine:
         self.history = []                # 上下文记忆，最多留 3 轮
         self.chat_streak = 0             # 连续闲扯计数器（软收尾用）
         self.end_streak = 0              # 连续结束语计数器（对话结束判断用）
-        self.bargain_step = 0            # 议价状态机：0=未开始 1=已摸底 2=已分档 3=已升级
+        self.bargain_step = 0            # 议价状态机：0=未开始 1=报区间 2=报实价 3=摸底 4=已优惠 5+=升级
+        self.bargain_pullback_count = 0  # 拉回正题计数器，连续2轮不正面回答就引导加微信
+        self.llm_fallback_streak = 0     # LLM兜底连续次数（盲区检测用）
         self.llm_fallback_streak = 0     # LLM兜底连续次数（盲区检测用）
 
     # ---------- 通用辅助：抽取变量 + 渲染模板 ----------
@@ -222,7 +224,7 @@ class CustomerServiceEngine:
 
     def _handle_bargain(self, text):
         """
-        议价状态机（4步流程：报价→选材料→摸底→优惠→升级）
+        议价状态机（4步流程 + 闭环兜底：报价→选材料→摸底→优惠→升级）
         返回：(阶段名, 话术内容)
 
         状态定义：
@@ -232,11 +234,15 @@ class CustomerServiceEngine:
           3 = 已发摸底反问（等用户报面积/数量）
           4 = 已给优惠报价
           5+ = 升级话术
+
+        核心原则：每一步都有闭环，接不住也有兜底，绝对不跑丢
         """
         is_price = self._is_price_question(text)
         is_bargain = self._is_bargain_question(text)
+        is_end = self._is_end_conversation(text)
         order_size = self._detect_order_size(text)
         material = self._detect_material_choice(text)
+        preference = self._detect_preference_type(text)
 
         # 从历史里找线索（本轮判断不出就看历史）
         if order_size is None:
@@ -252,9 +258,14 @@ class CustomerServiceEngine:
                     material = mat
                     break
 
-        # ========== 特殊场景：一步到位（既说了材料又说了数量） ==========
+        # ========== 结束对话检测（任何阶段都可能触发）==========
+        if is_end:
+            return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
+
+        # ========== 特殊场景：一步到位（既说了材料又说了数量）==========
         if material and order_size and self.bargain_step <= 2:
             self.bargain_step = 4
+            self.bargain_pullback_count = 0
             return order_size, self._render_bargain_template(
                 f"bargain_{order_size}", material=material
             )
@@ -262,76 +273,173 @@ class CustomerServiceEngine:
         # ========== Step 0：初次进入：先报价格区间 ==========
         if self.bargain_step == 0:
             self.bargain_step = 1
+            self.bargain_pullback_count = 0
             return "price_range", self._render_bargain_template("bargain_price_range")
 
         # ========== Step 1：等用户选材料 ==========
         if self.bargain_step == 1:
-            # 特殊：用户说了材料 → 报实价，跳到step2
+            # 明确选了材料 → 报实价，进step2
             if material:
                 self.bargain_step = 2
+                self.bargain_pullback_count = 0
                 return "material_price", self._render_bargain_template(
                     "bargain_material_price", material=material
                 )
-            # 用户说了面积但没说材料 → 按默认材料报价，跳到step2
-            elif order_size:
+
+            # 说了性价比偏好 → 推荐颗粒板
+            if preference == "cost_effective":
+                self.bargain_step = 2
+                self.bargain_pullback_count = 0
+                return "material_price", self._render_bargain_template(
+                    "bargain_material_price", material="particle_board"
+                )
+
+            # 说了环保偏好 → 推荐生态板
+            if preference == "eco_friendly":
+                self.bargain_step = 2
+                self.bargain_pullback_count = 0
+                return "material_price", self._render_bargain_template(
+                    "bargain_material_price", material="ecological_board"
+                )
+
+            # 平衡型/让推荐 → 推荐主推款（main_material）
+            if preference == "balanced":
+                main_mat = self.config.get("main_material", "multi_layer_board")
+                self.bargain_step = 2
+                self.bargain_pullback_count = 0
+                return "material_price", self._render_bargain_template(
+                    "bargain_material_price", material=main_mat
+                )
+
+            # 只说了面积没说材料 → 按默认材料报价，进step2
+            if order_size:
                 default_mat = self.config.get("default_material", "particle_board")
                 self.bargain_step = 2
+                self.bargain_pullback_count = 0
                 return "material_price", self._render_bargain_template(
                     "bargain_material_price", material=default_mat
                 )
-            # 砍价直接来的话 → 也先报价格区间（重复step1，但换个说法）
-            elif is_bargain:
+
+            # 直接砍价来的 → 再报一次价格区间（换个说法）
+            if is_bargain:
+                self.bargain_pullback_count += 1
+                if self.bargain_pullback_count >= 2:
+                    return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
                 return "price_range", self._render_bargain_template("bargain_price_range")
-            # 识别不出 → 追问需求方向，留在step1
-            else:
-                return "material_clarify", self._render_bargain_template("bargain_material_clarify")
+
+            # 以上都没命中 → 推荐主推款（比追问更能推进转化）
+            self.bargain_pullback_count += 1
+            if self.bargain_pullback_count >= 2:
+                return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
+            main_mat = self.config.get("main_material", "multi_layer_board")
+            self.bargain_step = 2
+            return "material_price", self._render_bargain_template(
+                "bargain_material_price", material=main_mat
+            )
 
         # ========== Step 2：等用户问优惠 ==========
         if self.bargain_step == 2:
-            # 用户问优惠/砍价 → 摸底反问，进step3
+            # 问优惠/砍价/嫌贵 → 摸底，进step3
             if is_bargain:
                 self.bargain_step = 3
+                self.bargain_pullback_count = 0
                 return "probe", self._render_bargain_template("bargain_probe")
-            # 用户又说面积 → 按材料+数量直接给优惠价，跳step4
-            elif order_size:
-                self.bargain_step = 4
-                return order_size, self._render_bargain_template(
-                    f"bargain_{order_size}",
-                    material=material or self.config.get("default_material", "particle_board")
-                )
-            # 用户选了另一种材料 → 换材料价格
-            elif material:
+
+            # 确认/认可 → 顺势问需求，进step3摸底
+            confirm_keywords = ["行", "可以", "还行", "好的", "没问题", "嗯", "ok", "OK"]
+            if any(kw in text for kw in confirm_keywords):
+                self.bargain_step = 3
+                self.bargain_pullback_count = 0
+                return "probe", self._render_bargain_template("bargain_probe")
+
+            # 又换了另一种材料 → 换材料报价
+            if material:
+                self.bargain_pullback_count = 0
                 return "material_price", self._render_bargain_template(
                     "bargain_material_price", material=material
                 )
-            # 其他情况 → 重复材料相关话术还是报价话术
-            #（比如用户说"行的的的话
-            else:
-                return "material_price", self._render_bargain_template(
-                    "bargain_material_price",
-                    material=material or self.config.get("default_material", "particle_board")
-                )
 
-        # ========== Step 3：等用户报面积/数量 ==========
-        if self.bargain_step == 3:
-            # 有面积线索 → 给优惠价，进step4
+            # 说了面积 → 按材料+数量直接给优惠价，跳step4
             if order_size:
                 self.bargain_step = 4
+                self.bargain_pullback_count = 0
                 return order_size, self._render_bargain_template(
                     f"bargain_{order_size}",
                     material=material or self.config.get("default_material", "particle_board")
                 )
-            # 检测不出 → 默认走中单（不跑丢，进step4
-            else:
+
+            # 其他情况 → 拉回正题
+            self.bargain_pullback_count += 1
+            if self.bargain_pullback_count >= 2:
+                return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
+            return "pullback", self._render_pullback_template(step=2)
+
+        # ========== Step 3：等用户报面积/数量 ==========
+        if self.bargain_step == 3:
+            # 有面积/数量线索 → 给优惠价，进step4
+            if order_size:
                 self.bargain_step = 4
+                self.bargain_pullback_count = 0
+                return order_size, self._render_bargain_template(
+                    f"bargain_{order_size}",
+                    material=material or self.config.get("default_material", "particle_board")
+                )
+
+            # 说不知道/没量过 → 默认走中单（不跑丢），进step4
+            unknown_keywords = ["不知道", "没量", "没算过", "不清楚", "大概吧", "还没", "不确定"]
+            if any(kw in text for kw in unknown_keywords):
+                self.bargain_step = 4
+                self.bargain_pullback_count = 0
                 return "medium", self._render_bargain_template(
                     "bargain_medium",
                     material=material or self.config.get("default_material", "particle_board")
                 )
 
-        # ========== Step 4 及以后：升级话术 ==========
+            # 不正面回答（让先报价）→ 拉回正题
+            dodge_keywords = ["你先报", "先报个价", "合适再说", "你说说", "报个价"]
+            if any(kw in text for kw in dodge_keywords):
+                self.bargain_pullback_count += 1
+                if self.bargain_pullback_count >= 2:
+                    return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
+                return "pullback", self._render_pullback_template(step=3)
+
+            # 检测不出 → 默认走中单（不跑丢，继续推进）
+            self.bargain_step = 4
+            self.bargain_pullback_count = 0
+            return "medium", self._render_bargain_template(
+                "bargain_medium",
+                material=material or self.config.get("default_material", "particle_board")
+            )
+
+        # ========== Step 4 及以后 ==========
         # bargain_step >= 4
-        return "upgrade", self._render_bargain_template("bargain_upgrade")
+        # 继续砍价 → 升级话术
+        if is_bargain:
+            self.bargain_step += 1
+            self.bargain_pullback_count = 0
+            return "upgrade", self._render_bargain_template("bargain_upgrade")
+
+        # 其他情况 → 拉回逼单或引导留资
+        self.bargain_pullback_count += 1
+        if self.bargain_pullback_count >= 2:
+            return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
+        return "pullback", self._render_pullback_template(step=4)
+
+
+    def _render_pullback_template(self, step):
+        """
+        渲染拉回正题话术（根据当前step选对应话术）
+        bargain_pullback 模板组有4条，分别对应 step 1-4
+        """
+        for hot_q in self.templates.get("hot_questions", []):
+            if hot_q.get("category") == "bargain_pullback":
+                templates_list = hot_q.get("templates", [])
+                if templates_list:
+                    # step 1 对应索引0，step 2 对应索引1...
+                    idx = max(0, min(step - 1, len(templates_list) - 1))
+                    return self._render(templates_list[idx])
+        # 兜底
+        return "咱先把这事定下来？"
 
     def _render_bargain_template(self, category_name, material=None):
         """
@@ -402,6 +510,49 @@ class CustomerServiceEngine:
                 best_material = mat_key
 
         return best_material if best_count > 0 else None
+
+    def _detect_preference_type(self, text):
+        """
+        检测用户在选材料阶段的偏好类型
+        返回：cost_effective（性价比）/ eco_friendly（环保）/ balanced（平衡/让推荐）/ None
+        """
+        # 性价比关键词
+        cost_keywords = [
+            "便宜", "性价比", "预算", "实惠", "省钱", "划算",
+            "便宜点", "便宜的", "经济", "实惠点", "预算有限",
+        ]
+        # 环保关键词
+        eco_keywords = [
+            "环保", "孩子", "小孩", "孕妇", "无甲醛", "健康",
+            "环保的", "环保点", "甲醛", "宝宝", "怀孕",
+        ]
+        # 平衡/让推荐关键词
+        balanced_keywords = [
+            "都行", "你推荐", "你看着办", "均衡", "都可以",
+            "卖得最好", "最火的", "热门", "推荐一下", "你觉得",
+            "差不多", "随便", "都要",
+        ]
+
+        if any(kw in text for kw in eco_keywords):
+            return "eco_friendly"
+        if any(kw in text for kw in cost_keywords):
+            return "cost_effective"
+        if any(kw in text for kw in balanced_keywords):
+            return "balanced"
+        return None
+
+    def _is_end_conversation(self, text):
+        """
+        检测用户不想聊了的信号（议价流程中触发引导留资）
+        """
+        end_keywords = [
+            "我考虑下", "先看看", "再说吧", "我想想", "不急",
+            "以后再说", "再考虑", "先考虑", "我再看看", "考虑一下",
+            "算了", "算了吧", "不考虑了", "先不", "暂时",
+            "我先了解一下", "对比一下", "再对比", "我看看再说",
+            "我先想想", "我先考虑", "先想一下", "再想想",
+        ]
+        return any(kw in text for kw in end_keywords)
 
     def _is_bargain_question(self, text):
         """判断是不是议价相关问题（命中 bargain 类关键词）"""
@@ -565,6 +716,7 @@ class CustomerServiceEngine:
             self.history = []
             self.chat_streak = 0
             self.bargain_step = 0            # 对话结束，议价状态重置
+            self.bargain_pullback_count = 0   # 对话结束，拉回计数重置
             self.llm_fallback_streak = 0     # 对话结束，盲区计数重置
             print("[日志] 对话已结束，上下文已清空")
 
@@ -577,7 +729,8 @@ class CustomerServiceEngine:
             f"[status] 历史 {len(self.history)} 轮 | "
             f"连续闲扯 {self.chat_streak} | "
             f"连续结束语 {self.end_streak} | "
-            f"议价阶段 {self.bargain_step}"
+            f"议价阶段 {self.bargain_step} | "
+            f"拉回计数 {self.bargain_pullback_count}"
         )
 
     def clear(self):
@@ -586,5 +739,6 @@ class CustomerServiceEngine:
         self.chat_streak = 0
         self.end_streak = 0
         self.bargain_step = 0
+        self.bargain_pullback_count = 0
         self.llm_fallback_streak = 0
         return "[clear] 上下文已清空"

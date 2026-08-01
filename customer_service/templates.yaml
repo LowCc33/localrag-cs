@@ -80,13 +80,24 @@ hot_questions:
       - "{{material_name}}一平{{material_price}}，按{{price_method}}算。五金用的{{hardware}}，封边是{{edge_band}}，这配置在同价位里很能打了。"
       - "您选的{{material_name}}是{{material_price}}一平，计价方式是{{price_method}}。标配{{hardware}}，封边{{edge_band}}，您看这配置行吗？"
 
-  # 0.3 没识别出材料时追问（议价状态机专用 Step 1停留）
-  - category: bargain_material_clarify
+  # 0.3 拉回正题话术（议价各阶段通用，按step选用）
+  - category: bargain_pullback
     bargain_only: true
     keywords: []
     templates:
-      - "您主要关注哪方面？环保、性价比还是颜值？我给您推荐合适的材料。"
-      - "材料这东西一分钱一分货，您预算大概多少一平？我给您找个性价比最高的。"
+      - "对了，您这边大概想用什么材料？我好给您报准确价格。"
+      - "您看这个配置行吗？合适的话我给您算下具体报价。"
+      - "对了，您大概做多少平呀？我好给您申请最合适的优惠。"
+      - "您看这个价位合适不？合适的话咱可以安排免费量房。"
+
+  # 0.4 引导加微信留资（议价流程最终兜底）
+  - category: bargain_lead_wechat
+    bargain_only: true
+    keywords: []
+    templates:
+      - "这一句两句也说不清楚，您加我微信{{wechat_id}}吧，我把详细报价单和案例都发您看看。"
+      - "您加我微信{{wechat_id}}聊吧，微信上说方便，有什么问题随时问我。"
+      - "要不您加我微信{{wechat_id}}？我让设计师跟您对接，免费给您出个方案和报价。"
 
   # 1.1 议价第一步：反问摸底（议价状态机专用）
   - category: bargain_probe
