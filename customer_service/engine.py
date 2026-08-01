@@ -385,9 +385,11 @@ class CustomerServiceEngine:
             if process_result is not None:
                 self.llm_fallback_streak = 0
                 tag, answer = process_result
-            elif is_bargain or (self.bargain_step > 0 and has_size_clue):
+            elif is_bargain or self.bargain_step > 0:
                 # 3) 议价多轮状态机
-                # 触发条件：① 有议价关键词 ② 或 已在议价中且有数量线索
+                # 触发条件：① 有议价关键词 ② 或 已在议价流程中（bargain_step>0）
+                # 注意：已在议价中时不需要有数量线索，任何回复都交给状态机处理
+                #       检测不出单值时状态机内部有降级逻辑（默认走中单），不会崩
                 stage, answer = self._handle_bargain(text)
                 self.llm_fallback_streak = 0
                 tag = f"bargain/{stage}"
