@@ -59,6 +59,23 @@ unknown_question:
 # 优先级最高，不走 LLM，精准匹配
 # 每条结构：{keywords: [...], templates: [...]}
 
+# ==================== 确认类追问模板 ====================
+# 触发条件：用户说"是X吗"、"你说的X吧"这类确认句，结合上下文判断是/否
+# 变量：item=用户问的东西名，correct_item=纠正项（仅否定用）
+
+confirm_yes_templates:
+  - "对的，就是{{item}}。"
+  - "没错，我说的就是{{item}}。"
+  - "是的，{{item}}。"
+  - "对，就是这个意思。"
+  - "嗯，就是{{item}}。"
+
+confirm_no_templates:
+  - "不是的，我说的是{{correct_item}}。"
+  - "不对不对，我刚才说的是{{correct_item}}。"
+  - "不是，是{{correct_item}}，您可能听错了。"
+  - "哈哈不是，我说的是{{correct_item}}哦。"
+
 hot_questions:
 
   # ================ 一、议价体系（9个场景） ================

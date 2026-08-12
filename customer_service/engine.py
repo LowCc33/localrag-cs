@@ -164,9 +164,45 @@ class CustomerServiceEngine:
         return None
 
     # ---------- 2) 工艺能力判断 ----------
+    def _get_merged_process_templates(self):
+        """
+        获取合并后的工艺模板列表（系统内置 + 商家自定义）
+        商家自定义的优先级更高，同 key 覆盖系统内置的
+        结果缓存，不用每次合并
+        """
+        if hasattr(self, "_merged_process_templates"):
+            return self._merged_process_templates
+
+        # 1) 收集系统内置的工艺模板（带 process_key 的）
+        builtin = {}
+        for hot_q in self.templates.get("hot_questions", []):
+            process_key = hot_q.get("process_key")
+            if process_key:
+                builtin[process_key] = hot_q
+
+        # 2) 收集商家自定义的工艺模板
+        from customer_service.shop_config_loader import convert_processes_to_templates
+        shop_processes = self.config.get("_processes", [])
+        shop_templates = convert_processes_to_templates(shop_processes)
+        shop_dict = {}
+        for tpl in shop_templates:
+            key = tpl.get("process_key")
+            if key:
+                shop_dict[key] = tpl
+
+        # 3) 合并：商家的覆盖系统的
+        merged = dict(builtin)
+        merged.update(shop_dict)
+
+        # 转成列表返回
+        result = list(merged.values())
+        self._merged_process_templates = result
+        return result
+
     def _match_process_question(self, text):
         """
         匹配工艺关键词，识别客户问的是哪个工艺
+        匹配源：系统内置工艺模板 + 商家自定义工艺（商家的优先级高）
         匹配度最高优先（匹配关键词数多的优先）
         查 shop_config 的 process_capability
         能做 → 渲染 yes_templates
@@ -177,7 +213,8 @@ class CustomerServiceEngine:
         best_count = 0
         best_len = 0
 
-        for hot_q in self.templates.get("hot_questions", []):
+        process_templates = self._get_merged_process_templates()
+        for hot_q in process_templates:
             process_key = hot_q.get("process_key")
             if not process_key:
                 continue
@@ -712,27 +749,132 @@ class CustomerServiceEngine:
     def _detect_material_choice(self, text):
         """
         识别用户选择了哪种材料
-        返回材料key：particle_board/multi_layer_board/ecological_board/solid_wood/osb_board
-        识别不到返回 None
+        返回材料key，识别不到返回 None
+        关键词从配置的 _board_keywords_map 动态读取，不写死
         """
-        # 材料关键词映射（材料key → 关键词列表）
-        material_keywords = {
-            "particle_board": ["颗粒板", "刨花板", "799", "899"],
-            "multi_layer_board": ["多层板", "胶合板", "1099", "1299"],
-            "ecological_board": ["生态板", "免漆板", "1199", "1399"],
-            "solid_wood": ["实木", "原木板", "1699", "1899"],
-            "osb_board": ["OSB板", "欧松板", "osb", "OSB", "999", "1199"],
-        }
+        keywords_map = self.config.get("_board_keywords_map", {})
+        if not keywords_map:
+            # ponytail: 兼容旧配置，没有动态映射就用硬编码兜底
+            keywords_map = {
+                "particle_board": ["颗粒板", "刨花板"],
+                "multi_layer_board": ["多层板", "胶合板"],
+                "osb_board": ["OSB板", "欧松板", "osb", "OSB"],
+                "ecological_board": ["生态板", "免漆板"],
+                "solid_wood": ["实木", "原木板"],
+            }
 
         best_material = None
         best_count = 0
-        for mat_key, keywords in material_keywords.items():
+        for mat_key, keywords in keywords_map.items():
             count = sum(1 for kw in keywords if kw in text)
             if count > best_count:
                 best_count = count
                 best_material = mat_key
 
         return best_material if best_count > 0 else None
+
+    def _is_confirmation_question(self, text):
+        """
+        判断是不是确认类追问（"是X吗"、"你说的X吧"、"对吗"这类）
+        核心特征：用户在确认某个具体东西（材料/品牌等），而不是问开放式事实问题
+        是返回 True，否则返回 False
+        """
+        # 模式1："你说的...吗/吧" 明确确认
+        if "你说的" in text and ("吗" in text or "吧" in text):
+            return True
+        
+        # 模式2："是X吗/是X吧" 开头是确认
+        if text.startswith("是") and ("吗" in text or "吧" in text):
+            return True
+        
+        # 模式3："对吗/是不是/是吧/对吧" 纯确认词
+        confirm_words = ["对吗", "是不是", "是吧", "对吧", "没错吧", "不？", "不?"]
+        if any(w in text for w in confirm_words):
+            return True
+        
+        # 模式4：材料名 + 吗/吧 → 确认材料（比如"多层板吗"、"颗粒板吧"）
+        # ponytail: 只有确认具体材料才算，纯属性提问（环保吗/贵吗）不算
+        mat = self._detect_material_choice(text)
+        if mat and ("吗" in text or "吧" in text or "？" in text or "?" in text):
+            return True
+        
+        return False
+
+    def _extract_confirm_item(self, text):
+        """
+        从确认类追问中提取用户问的是什么东西
+        返回：{"type": "material", "key": "xxx", "name": "xxx"} 或 None
+        目前支持：材料类确认
+        """
+        # 先试试材料
+        mat_key = self._detect_material_choice(text)
+        if mat_key:
+            return {
+                "type": "material",
+                "key": mat_key,
+                "name": get_material_name(mat_key, self.config),
+            }
+        # 环保类确认
+        if "环保" in text:
+            return {"type": "eco", "key": "eco", "name": "环保"}
+        # 封边类确认
+        if "封边" in text:
+            return {"type": "edge_band", "key": "edge_band", "name": "封边"}
+        # 五金类确认
+        if "五金" in text:
+            return {"type": "hardware", "key": "hardware", "name": "五金"}
+        return None
+
+    def _bot_mentioned_item(self, bot_text, item):
+        """
+        判断上一轮客服回答中是否提到过某个东西
+        bot_text: 上一轮客服回答文本
+        item: _extract_confirm_item 返回的字典
+        返回 True/False
+        """
+        if not bot_text or not item:
+            return False
+        item_type = item["type"]
+        if item_type == "material":
+            # 材料名关键词都算提到过（中文名、价格数字等）
+            mat_name = item["name"]
+            if mat_name in bot_text:
+                return True
+            # 价格数字也算（比如"799"对应颗粒板）
+            mat_price = str(get_material_price(self.config, item["key"]))
+            if mat_price and mat_price in bot_text:
+                return True
+            return False
+        elif item_type == "eco":
+            return "环保" in bot_text or "ENF" in bot_text or "E0" in bot_text
+        elif item_type == "edge_band":
+            return "封边" in bot_text
+        elif item_type == "hardware":
+            return "五金" in bot_text
+        return False
+
+    def _get_confirm_answer(self, item, is_yes):
+        """
+        渲染确认类追问的回答
+        item: _extract_confirm_item 返回的字典
+        is_yes: True=肯定回答，False=否定回答
+        返回回答字符串
+        """
+        tpl_list = self.templates.get("confirm_yes_templates" if is_yes else "confirm_no_templates", [])
+        if not tpl_list:
+            # ponytail: 模板没配置就用兜底话术，不报错
+            if is_yes:
+                return f"对的，就是{item['name']}。"
+            return "不是的，我说的不是这个。"
+        template_str = random.choice(tpl_list)
+        # 否定回答需要纠正项（用上一轮推荐的材料或默认材料）
+        extra_vars = {"item": item["name"]}
+        if not is_yes:
+            # 用当前选中的材料作为纠正项，没有就用主推款
+            correct_mat = self.selected_material or self.config.get("main_material", "multi_layer_board")
+            correct_name = get_material_name(correct_mat, self.config)
+            extra_vars["correct_item"] = correct_name
+        return Template(template_str).render(**self._vars(), **extra_vars)
 
     def _detect_room_type(self, text):
         """
@@ -1648,6 +1790,17 @@ class CustomerServiceEngine:
                 should_enter_bargain = True
 
         if should_enter_bargain:
+            # ===== 新增：简单追问直答层（优先级高于状态机）=====
+            # 先答问题，再推进状态机。处理不了再交给状态机
+            if self.bargain_step > 0:
+                followup_result = self._handle_simple_followup(text, final_category)
+                if followup_result is not None:
+                    tag, answer = followup_result
+                    self.llm_fallback_streak = 0
+                    self.history.append({"user": text, "bot": answer})
+                    self.history = self.history[-3:]
+                    return tag, answer
+
             tag, answer = self._handle_bargain_v2(text, final_category)
             # 状态机说接不住（返回None）→ 退出去走全局分类
             if tag is None:
@@ -1692,6 +1845,104 @@ class CustomerServiceEngine:
         from jinja2 import Template
         import random
         return Template(random.choice(fallbacks)).render(**self._vars())
+
+    def _handle_simple_followup(self, text, llm_category=None):
+        """
+        简单追问直答层（插在议价状态机前面）
+        核心原则：先答问题，再推进状态机
+        
+        处理三种简单追问：
+        1. 确认类追问（"是X吗"、"你说的X吧"）→ 查上下文答是或不是
+        2. 材料细节类追问（环保/封边/五金等事实问题）→ 先答再推进
+        3. 其他能直接命中关键词的问题 → 先答再推进
+        
+        返回：(tag, answer) 或 None（表示不是简单追问，继续走状态机）
+        """
+        # 不在议价中，不处理
+        if self.bargain_step == 0:
+            return None
+        # 没有上一轮对话，没法做上下文判断
+        if not self.history:
+            return None
+        prev_bot = self.history[-1].get("bot", "")
+
+        # ===== 类型A：确认类追问 =====
+        if self._is_confirmation_question(text):
+            item = self._extract_confirm_item(text)
+            if item is None:
+                # 提取不出确认项，可能是"对吗/是吗"这种泛确认，默认肯定
+                # 只有当上一轮是问句（比如在摸底问面积），才推进状态机
+                return None  # ponytail: 泛确认太复杂，先交给状态机处理
+            
+            # 查上一轮有没有提到过这个东西
+            is_yes = self._bot_mentioned_item(prev_bot, item)
+            confirm_answer = self._get_confirm_answer(item, is_yes)
+            
+            # 答完后要推进状态机——把问题+回答交给状态机，获取推进话术
+            # 做法：先回答确认，再拼接状态机的响应
+            # 但这里不能直接调状态机（会重复存history），所以只答确认+加一句推进的话
+            # 推进话术：如果是材料类确认且在step1，就顺势问面积
+            follow_up = self._get_bargain_follow_up()
+            full_answer = confirm_answer + follow_up
+            return "followup/confirm", full_answer
+
+        # ===== 类型B/C：事实类追问（材料细节/环保/封边等）=====
+        # 条件：LLM分类是详情类，或关键词能命中高频问题
+        detail_categories = ("material_detail", "hardware_detail", "process_question",
+                             "after_sales", "shop_info", "measurement", "product_type")
+        is_detail_question = (llm_category in detail_categories) if llm_category else False
+        
+        # 关键词命中检测（不依赖LLM）
+        hot_result = self._match_hot_question(text)
+        if hot_result:
+            hot_category, hot_answer = hot_result
+            # 已经是答案了，再加一句推进议价的话
+            follow_up = self._get_bargain_follow_up()
+            full_answer = hot_answer + "\n" + follow_up
+            return f"followup/{hot_category}", full_answer
+        
+        if is_detail_question:
+            # LLM说是详情类但关键词没命中 → 尝试渲染分类模板
+            detail_answer = self._render_category_template(llm_category, text)
+            if detail_answer:
+                follow_up = self._get_bargain_follow_up()
+                full_answer = detail_answer + "\n" + follow_up
+                return f"followup/{llm_category}", full_answer
+
+        # 都不是，返回None交给状态机
+        return None
+
+    def _get_bargain_follow_up(self):
+        """
+        答完简单追问后，追加一句推进议价的话术
+        根据当前bargain_step决定问什么
+        """
+        if self.bargain_step == 1:
+            # 刚报完区间，问选材料还是面积
+            templates = [
+                "对了，您打算选什么材料呀？",
+                "您柜子大概做多大？我给您算总价。",
+                "您家用在哪个房间？我给您推荐最适合的。",
+            ]
+            return random.choice(templates)
+        elif self.bargain_step == 2:
+            # 已经报了实价，问面积推进
+            templates = [
+                "您大概做几个柜子？",
+                "面积有多大？我给您算个总价。",
+                "对了，您什么时候要啊？",
+            ]
+            return random.choice(templates)
+        elif self.bargain_step >= 3:
+            # 摸底或以后，问具体信息
+            templates = [
+                "您大概做多大面积呀？",
+                "您房子在哪？我看看有没有附近的案例。",
+                "什么时候方便量个房？",
+            ]
+            return random.choice(templates)
+        else:
+            return ""
 
     def _handle_bargain_v2(self, text, llm_category):
         """

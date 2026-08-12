@@ -70,6 +70,38 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
     service = json_cfg.get("service", {})
     sales = json_cfg.get("sales_script", {})
 
+    # ===== 板材配置动态化：从 boards 列表构建映射 =====
+    # 如果有 boards 字段（新格式），直接用；没有就从旧格式自动转换
+    boards_list = materials.get("boards", [])
+    if not boards_list:
+        # ponytail: 兼容旧格式，从 pricing 里的5个固定价格字段 + board_names 自动生成 boards 列表
+        boards_list = _convert_old_pricing_to_boards(pricing, materials)
+
+    # 构建各种映射表，供引擎使用
+    board_maps = _build_board_maps(boards_list)
+
+    # 工艺列表（新格式有 processes 字段，没有就是空列表）
+    processes = json_cfg.get("processes", [])
+
+    # 找默认板材和主推板材
+    default_board = None
+    main_board = None
+    for board in boards_list:
+        if board.get("is_default"):
+            default_board = board.get("key")
+        if board.get("is_premium"):
+            main_board = board.get("key")
+    # basic_info 里的 default_material 优先级最高（如果配置了的话）
+    if basic.get("default_material"):
+        default_board = basic["default_material"]
+    if basic.get("main_material"):
+        main_board = basic["main_material"]
+    # 兜底：都没设置就选第一个
+    if not default_board and boards_list:
+        default_board = boards_list[0]["key"]
+    if not main_board and boards_list:
+        main_board = boards_list[-1]["key"]  # 最后一个当主推（通常最贵的）
+
     # 组装成引擎兼容的结构
     result = {
         # === 店铺基础信息 ===
@@ -79,34 +111,31 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
         "city": basic.get("city", ""),
         "shop_location": basic.get("shop_location", ""),
         "wechat_id": basic.get("wechat_id", ""),
-        "default_material": basic.get("default_material", "particle_board"),
+        "default_material": default_board,
+        "main_material": main_board,
 
         # === 产品硬参数 ===
         "board_brand": materials.get("default_board_brand", ""),
         "edge_band": materials.get("default_edge_band", ""),
         "hardware_brand": materials.get("default_hardware_brand", ""),
         "eco_level": materials.get("default_eco_level", ""),
-        "board_names": materials.get("board_names", MATERIAL_NAME_MAP),
+        "board_names": board_maps["name_map"],
+
+        # === 板材动态化数据 ===
+        "_boards": boards_list,              # 原始板材列表
+        "_board_name_map": board_maps["name_map"],    # key→中文名
+        "_board_price_map": board_maps["price_map"],  # key→价格
+        "_board_keywords_map": board_maps["keywords_map"],  # key→关键词列表
+        "_board_brand_map": board_maps["brand_map"],  # key→品牌
+        "_board_eco_map": board_maps["eco_map"],      # key→环保等级
 
         # === 价格信息（供议价状态机用） ===
         "_pricing": pricing,  # 原始价格表，内部方法用
         "_base_price_method": pricing.get("base_price_method", "投影面积"),
 
-        # === 工艺能力（JSON里没单独定义，默认全开，商家可自行添加） ===
-        "process_capability": {
-            "arc_curved": True,
-            "door_wall_cabinet": True,
-            "hole_board": True,
-            "wall_panel": True,
-            "interior_door": True,
-            "glass_door": True,
-            "aluminum_frame": True,
-            "ox_horn_handle": False,
-            "hidden_handle": True,
-            "rebound_device": True,
-            "tatami": True,
-            "open_kitchen": True,
-        },
+        # === 工艺能力（从processes读取，没有就用默认） ===
+        "process_capability": _build_process_capability(json_cfg),
+        "_processes": processes,  # 原始工艺列表，引擎侧合并模板用
 
         # === 付款方式 ===
         "payment_terms": {
@@ -161,45 +190,160 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
     return result
 
 
-# 材料 key → 中文名 映射
-MATERIAL_NAME_MAP = {
-    "particle_board": "颗粒板",
-    "multi_layer_board": "多层板",
-    "osb_board": "欧松板",
-    "ecological_board": "生态板",
-    "solid_wood": "实木板",
-}
+def _convert_old_pricing_to_boards(pricing: dict, materials: dict) -> list:
+    """
+    兼容旧格式：从 pricing 里的5个固定价格字段 + board_names 自动生成 boards 列表
+    旧格式没有 keywords、brand、eco_level 等字段，用名称和合理默认值填充
+    """
+    old_price_map = {
+        "particle_board": "particle_board_price",
+        "multi_layer_board": "multi_layer_board_price",
+        "osb_board": "osb_board_price",
+        "ecological_board": "ecological_board_price",
+        "solid_wood": "solid_wood_price",
+    }
+    old_name_map = materials.get("board_names", {})
+    default_brand = materials.get("default_board_brand", "")
+    default_eco = materials.get("default_eco_level", "")
 
-# 材料key → 价格字段名 映射
-MATERIAL_PRICE_KEY_MAP = {
-    "particle_board": "particle_board_price",
-    "multi_layer_board": "multi_layer_board_price",
-    "osb_board": "osb_board_price",
-    "ecological_board": "ecological_board_price",
-    "solid_wood": "solid_wood_price",
-}
+    # 默认关键词映射（旧格式没有，用通用关键词）
+    default_keywords = {
+        "particle_board": ["颗粒板", "刨花板"],
+        "multi_layer_board": ["多层板", "胶合板"],
+        "osb_board": ["OSB板", "欧松板", "osb", "OSB"],
+        "ecological_board": ["生态板", "免漆板"],
+        "solid_wood": ["实木", "原木板"],
+    }
+
+    boards = []
+    first = True
+    for key, price_field in old_price_map.items():
+        price = pricing.get(price_field, 0)
+        if price and price > 0:
+            name = old_name_map.get(key, key)
+            boards.append({
+                "key": key,
+                "name": name,
+                "brand": default_brand,
+                "eco_level": default_eco,
+                "price": price,
+                "is_default": first,  # 第一个当默认
+                "is_premium": False,   # 旧格式不确定，先都设为false
+                "keywords": default_keywords.get(key, [name]),
+            })
+            first = False
+    # 最后一个设为主推（通常最贵）
+    if boards:
+        boards[-1]["is_premium"] = True
+    return boards
+
+
+def _build_board_maps(boards_list: list) -> dict:
+    """
+    从 boards 列表动态构建各种映射表
+    返回：{name_map, price_map, keywords_map, brand_map, eco_map}
+    """
+    name_map = {}
+    price_map = {}
+    keywords_map = {}
+    brand_map = {}
+    eco_map = {}
+
+    for board in boards_list:
+        key = board.get("key")
+        if not key:
+            continue
+        name_map[key] = board.get("name", key)
+        price_map[key] = board.get("price", 0)
+        keywords_map[key] = board.get("keywords", [])
+        brand_map[key] = board.get("brand", "")
+        eco_map[key] = board.get("eco_level", "")
+
+    return {
+        "name_map": name_map,
+        "price_map": price_map,
+        "keywords_map": keywords_map,
+        "brand_map": brand_map,
+        "eco_map": eco_map,
+    }
+
+
+def _build_process_capability(json_cfg: dict) -> dict:
+    """
+    构建工艺能力字典
+    优先从 processes 列表读取，没有就用默认的12种
+    """
+    processes = json_cfg.get("processes", [])
+    if processes:
+        # 新格式：从 processes 列表构建
+        result = {}
+        for p in processes:
+            key = p.get("key")
+            if key:
+                result[key] = p.get("can_do", True)
+        return result
+    # 旧格式：默认全开（和之前一致）
+    return {
+        "arc_curved": True,
+        "door_wall_cabinet": True,
+        "hole_board": True,
+        "wall_panel": True,
+        "interior_door": True,
+        "glass_door": True,
+        "aluminum_frame": True,
+        "ox_horn_handle": False,
+        "hidden_handle": True,
+        "rebound_device": True,
+        "tatami": True,
+        "open_kitchen": True,
+    }
+
+
+def convert_processes_to_templates(processes: list) -> list:
+    """
+    把商家自定义的 processes 列表转换成引擎 hot_questions 的模板格式
+    每个工艺转成一个带 process_key 的 hot_question 条目
+    返回：hot_questions 格式的列表
+    """
+    result = []
+    for p in processes:
+        key = p.get("key")
+        if not key:
+            continue
+        entry = {
+            "category": f"process_{key}",
+            "process_key": key,
+            "keywords": p.get("keywords", []),
+            "yes_templates": p.get("yes_templates", []),
+            "no_templates": p.get("no_templates", []),
+        }
+        result.append(entry)
+    return result
+
+
+
 
 
 def get_material_name(material_key: str, config: dict = None) -> str:
-    """材料key转中文名，优先从配置 board_names 里取，没有则用内置映射"""
+    """材料key转中文名，从配置的动态映射里取"""
     if config:
+        name_map = config.get("_board_name_map", {})
+        if material_key in name_map:
+            return name_map[material_key]
+        # 兼容旧字段 board_names
         board_names = config.get("board_names", {})
         if material_key in board_names:
             return board_names[material_key]
-    return MATERIAL_NAME_MAP.get(material_key, material_key)
+    return material_key
 
 
 def get_price_range(config: dict) -> tuple:
     """
     计算价格区间（最低价, 最高价）
-    从 _pricing 里读各种板材价格，取最小和最大
+    从动态板材映射里读所有价格，取最小和最大
     """
-    pricing = config.get("_pricing", {})
-    prices = []
-    for price_key in MATERIAL_PRICE_KEY_MAP.values():
-        p = pricing.get(price_key, 0)
-        if p and p > 0:
-            prices.append(p)
+    price_map = config.get("_board_price_map", {})
+    prices = [p for p in price_map.values() if p and p > 0]
     if not prices:
         return 0, 0
     return min(prices), max(prices)
@@ -208,24 +352,22 @@ def get_price_range(config: dict) -> tuple:
 def get_materials_list_text(config: dict) -> str:
     """
     生成材料价格列表字符串，比如"颗粒板799/多层板1099/生态板1199"
+    从动态板材映射读取
     """
-    pricing = config.get("_pricing", {})
+    boards = config.get("_boards", [])
     items = []
-    for mat_key, price_key in MATERIAL_PRICE_KEY_MAP.items():
-        price = pricing.get(price_key, 0)
-        if price and price > 0:
-            name = MATERIAL_NAME_MAP.get(mat_key, mat_key)
+    for board in boards:
+        price = board.get("price", 0)
+        name = board.get("name", "")
+        if price and price > 0 and name:
             items.append(f"{name}{price}")
     return "/".join(items)
 
 
 def get_material_price(config: dict, material_key: str) -> int:
-    """获取指定材料的价格"""
-    pricing = config.get("_pricing", {})
-    price_key = MATERIAL_PRICE_KEY_MAP.get(material_key, "")
-    if not price_key:
-        return 0
-    return pricing.get(price_key, 0)
+    """获取指定材料的价格（从动态映射读取）"""
+    price_map = config.get("_board_price_map", {})
+    return price_map.get(material_key, 0)
 
 
 def format_shop_info_text(shop_id: str = None) -> str:
