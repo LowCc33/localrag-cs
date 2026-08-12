@@ -976,7 +976,7 @@ class CustomerServiceEngine:
         2. 检测偏好 _detect_preference_type(text)
         3. 场景和偏好都有 → 查矩阵
         4. 只有场景，没有偏好 → 用 recommend_me 作为默认偏好
-        5. 只有偏好，没有场景 → 用 bedroom_wardrobe 作为默认场景（最常见）
+        5. 只有偏好，没有场景 → 用 default 作为默认场景（通用推荐，不脑补具体房间）
         6. 都没有 → 返回 None
         
         返回：dict 或 None
@@ -985,7 +985,7 @@ class CustomerServiceEngine:
             "material_name": "颗粒板",          # 材料中文名
             "material_price": 799,              # 材料单价
             "reason": "xxx",                    # 推荐理由
-            "scene_key": "bedroom_wardrobe",    # 场景key
+            "scene_key": "default",              # 场景key
             "scene_name": "卧室衣柜",            # 场景中文名
             "preference": "cost_effective",     # 偏好key
             "follow_up": "您衣柜大概做多大？",   # 场景化跟进提问
@@ -998,10 +998,10 @@ class CustomerServiceEngine:
         if not scene_key and not preference:
             return None
 
-        # 默认场景：卧室衣柜（最常见的咨询场景）
+        # 默认场景：default（通用推荐，不脑补具体房间）
         if not scene_key:
-            scene_key = "bedroom_wardrobe"
-            scene_name = self.rec_matrix.get("scene_names", {}).get(scene_key, "卧室衣柜")
+            scene_key = "default"
+            scene_name = self.rec_matrix.get("scene_names", {}).get(scene_key, "通用")
 
         # 默认偏好：recommend_me（用户让我们推荐）
         if not preference:

@@ -15,6 +15,7 @@ scene_names:
   tatami: "榻榻米"
   living_room: "客厅"
   whole_house: "全屋"
+  default: "通用"
 
 # 偏好中文名映射
 preference_names:
@@ -35,7 +36,7 @@ scene_follow_up:
   tatami: "大概做几个平方？"
   living_room: "您客厅柜子大概做多大？"
   whole_house: "您房子多大面积？"
-  default: "您大概做几个柜子啊？"
+  default: "您主要做哪些柜子啊？"
 
 # ========== 二维推荐矩阵主体 ==========
 # 结构：scene_key -> preference_key -> {material, reason}
@@ -193,3 +194,20 @@ matrix:
     recommend_me:
       material: multi_layer_board
       reason: "全屋的话我推荐多层板，万金油，哪个房间都能用，卖得最多"
+
+  default:
+    cost_effective:
+      material: particle_board
+      reason: "性价比最高，预算有限首选，家用完全够用"
+    eco_friendly:
+      material: ecological_board
+      reason: "环保等级最高，ENF级零甲醛添加，住得放心"
+    balanced:
+      material: multi_layer_board
+      reason: "各方面都不错，防潮耐用都可以，家用最稳妥"
+    quality:
+      material: solid_wood
+      reason: "追求品质就选这款，质感和环保都是顶级"
+    recommend_me:
+      material: multi_layer_board
+      reason: "这款是我们家卖得最好的，各方面都均衡，不会踩坑"
