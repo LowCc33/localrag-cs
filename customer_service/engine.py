@@ -1746,6 +1746,16 @@ class CustomerServiceEngine:
                         self.history = self.history[-3:]
                         return "lead_capture", answer
 
+        # 0.5) 全局简单问题直答层（LLM分类之前，能直接答的先答）
+        # 处理：确认类追问、工艺类追问、材料细节类追问
+        simple_result = self._handle_simple_question(text)
+        if simple_result is not None:
+            tag, answer = simple_result
+            self.llm_fallback_streak = 0
+            self.history.append({"user": text, "bot": answer})
+            self.history = self.history[-3:]
+            return tag, answer
+
         # 1) 取上一轮对话
         prev_user, prev_bot = None, None
         if self.history:
@@ -1943,6 +1953,184 @@ class CustomerServiceEngine:
             return random.choice(templates)
         else:
             return ""
+
+    def _get_lead_follow_up(self):
+        """
+        非议价场景下，答完简单问题后追加的引导话术（引导加微信/问需求）
+        从 lead_hooks 和 concessions 里抽
+        """
+        lead_hooks = self.config.get("lead_hooks", [])
+        if lead_hooks:
+            return random.choice(lead_hooks)
+        # 兜底引导
+        fallbacks = [
+            "您家房子多大呀？我给您大概算个价？",
+            "您什么时候要用呀？我给您安排个免费量房？",
+            "您加我微信{{wechat_id}}，我发点案例和报价给您参考？",
+        ]
+        return self._render(random.choice(fallbacks))
+
+    def _match_process_by_keywords(self, text):
+        """
+        从商家配置的 processes 列表里，按关键词匹配工艺类问题
+        返回：(process_key, process_name, can_do, answer_template) 或 None
+        匹配规则：用户输入包含工艺的任意一个关键词就算命中，第一个命中的返回
+        """
+        processes = self.config.get("_processes", [])
+        for p in processes:
+            keywords = p.get("keywords", [])
+            for kw in keywords:
+                if kw and kw in text:
+                    return (
+                        p.get("key"),
+                        p.get("name", p.get("key", "")),
+                        p.get("can_do", True),
+                        p.get("answer_template", ""),
+                    )
+        return None
+
+    def _get_process_answer(self, process_key, process_name, can_do, answer_template):
+        """
+        生成工艺类问题的回答
+        优先用工艺配置的 answer_template，没有就用通用模板
+        """
+        if answer_template:
+            # 商家配置了专属模板，直接渲染
+            extra_vars = {
+                "process_name": process_name,
+            }
+            return self._render(answer_template, extra_vars)
+        
+        # 没有配置就用通用模板（能做/不能做）
+        if can_do:
+            yes_tpl = (
+                "没问题，{{process_name}}我们常做。"
+                "您加我微信{{wechat_id}}，我给您看看款式和案例。"
+            )
+            return self._render(yes_tpl, {"process_name": process_name})
+        else:
+            no_tpl = "{{process_name}}我们做不了，不好意思哈。"
+            return self._render(no_tpl, {"process_name": process_name})
+
+    def _handle_simple_question(self, text):
+        """
+        全局简单问题直答层（放在reply主入口最前面，留资检测之后、LLM分类之前）
+        能直接答的先答，不绕状态机、不走LLM
+        
+        处理顺序（优先级从高到低）：
+        1. 确认类追问（"是XX吗"、"你说的XX吧"）
+        2. 工艺类追问（"你们做铝框门不"、"能做洞洞板吗"）
+        3. 材料细节类追问（"环保吗"、"封边怎么样"、"五金什么牌子"）
+        
+        返回：(tag, answer) 或 None（不是简单问题，继续走原流程）
+        """
+        # ===== 第1优先级：确认类追问 =====
+        if self._is_confirmation_question(text):
+            item = self._extract_confirm_item(text)
+            if item is None:
+                return None  # 提取不出确认项，交给原流程
+            
+            # 判断是/否
+            prev_bot = None
+            if self.history:
+                prev_bot = self.history[-1].get("bot", "")
+            
+            if prev_bot:
+                # 有上下文，用上一轮bot回答判断
+                is_yes = self._bot_mentioned_item(prev_bot, item)
+            else:
+                # 没有上下文（上来就问），检查是不是我们有的配置
+                is_yes = self._item_is_available(item)
+            
+            confirm_answer = self._get_confirm_answer(item, is_yes)
+            
+            # 答完追加话术：议价中加推进，非议价加引导
+            if self.bargain_step > 0:
+                follow_up = self._get_bargain_follow_up()
+            else:
+                follow_up = "\n" + self._get_lead_follow_up()
+            
+            full_answer = confirm_answer + follow_up
+            return "simple/confirm", full_answer
+
+        # ===== 第2优先级：工艺类追问 =====
+        process_match = self._match_process_by_keywords(text)
+        if process_match:
+            pkey, pname, can_do, atpl = process_match
+            answer = self._get_process_answer(pkey, pname, can_do, atpl)
+            
+            # 答完追加话术
+            if self.bargain_step > 0:
+                follow_up = "\n" + self._get_bargain_follow_up()
+            else:
+                follow_up = "\n" + self._get_lead_follow_up()
+            
+            full_answer = answer + follow_up
+            return f"simple/process/{pkey}", full_answer
+
+        # ===== 第3优先级：材料细节类追问 =====
+        hot_result = self._match_hot_question(text)
+        if hot_result:
+            hot_category, hot_answer = hot_result
+            
+            # 只处理详情类的，其他类型（价格、砍价等）让原流程处理
+            detail_categories = (
+                "material_detail", "eco_level", "edge_band", "edge_glue",
+                "hardware_detail", "after_sales", "shop_info",
+                "pricing_method", "product_type",
+            )
+            # 检查hot_category是否包含详情类特征词
+            is_detail = False
+            for dc in detail_categories:
+                if dc in hot_category:
+                    is_detail = True
+                    break
+            
+            if is_detail:
+                if self.bargain_step > 0:
+                    follow_up = "\n" + self._get_bargain_follow_up()
+                else:
+                    follow_up = "\n" + self._get_lead_follow_up()
+                full_answer = hot_answer + follow_up
+                return f"simple/detail/{hot_category}", full_answer
+
+        # 都不是，返回None交给原流程
+        return None
+
+    def _item_is_available(self, item):
+        """
+        没有上下文时，判断用户确认的东西是不是我们有的
+        用于"上来就问是颗粒板吗"这种场景
+        """
+        item_type = item.get("type")
+        item_key = item.get("key")
+        
+        if item_type == "material":
+            # 在配置的板材列表里就是有的
+            name_map = self.config.get("_board_name_map", {})
+            return item_key in name_map
+        elif item_type == "eco":
+            # 环保我们默认就是有的（ENF级）
+            return True
+        elif item_type == "edge_band":
+            # 封边默认有
+            return bool(self.config.get("edge_band"))
+        elif item_type == "hardware":
+            # 五金默认有
+            return bool(self.config.get("hardware_brand"))
+        return False
+
+    def _render(self, template_str, extra_vars=None):
+        """
+        渲染单个模板字符串，注入配置变量
+        统一入口，避免到处写 from jinja2 import Template
+        """
+        from jinja2 import Template
+        if extra_vars:
+            vars_dict = {**self._vars(), **extra_vars}
+        else:
+            vars_dict = self._vars()
+        return Template(template_str).render(**vars_dict)
 
     def _handle_bargain_v2(self, text, llm_category):
         """

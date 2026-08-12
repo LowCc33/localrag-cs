@@ -63,7 +63,11 @@
         "price": 799,
         "is_default": true,
         "is_premium": false,
-        "keywords": ["颗粒板", "刨花板", "799"]
+        "keywords": [
+          "颗粒板",
+          "刨花板",
+          "799"
+        ]
       },
       {
         "key": "osb_board",
@@ -73,7 +77,13 @@
         "price": 999,
         "is_default": false,
         "is_premium": false,
-        "keywords": ["OSB板", "欧松板", "osb", "OSB", "999"]
+        "keywords": [
+          "OSB板",
+          "欧松板",
+          "osb",
+          "OSB",
+          "999"
+        ]
       },
       {
         "key": "multi_layer_board",
@@ -83,7 +93,11 @@
         "price": 1099,
         "is_default": false,
         "is_premium": true,
-        "keywords": ["多层板", "胶合板", "1099"]
+        "keywords": [
+          "多层板",
+          "胶合板",
+          "1099"
+        ]
       },
       {
         "key": "ecological_board",
@@ -93,7 +107,11 @@
         "price": 1199,
         "is_default": false,
         "is_premium": false,
-        "keywords": ["生态板", "免漆板", "1199"]
+        "keywords": [
+          "生态板",
+          "免漆板",
+          "1199"
+        ]
       },
       {
         "key": "solid_wood",
@@ -103,7 +121,11 @@
         "price": 1699,
         "is_default": false,
         "is_premium": true,
-        "keywords": ["实木", "原木板", "1699"]
+        "keywords": [
+          "实木",
+          "原木板",
+          "1699"
+        ]
       }
     ]
   },
@@ -169,69 +191,108 @@
       "key": "hole_board",
       "name": "洞洞板",
       "can_do": true,
-      "keywords": ["洞洞板", "挂板", "孔洞板", "冲孔板"],
+      "keywords": [
+        "洞洞板",
+        "挂板",
+        "孔洞板",
+        "冲孔板"
+      ],
       "yes_templates": [
         "洞洞板可以做的，特别适合入户和书房，收纳展示都方便。加我微信{{wechat_id}}，我发点洞洞板的案例给您看看？",
         "没问题，洞洞板我们经常做，可以自由调节，实用性很强。您加我微信{{wechat_id}}，我给您看看效果图片。"
       ],
       "no_templates": [
         "洞洞板我们不怎么做，主要是工艺要求高。不过我们可以做搁板替代，效果差不多，还更结实。您觉得呢？"
-      ]
+      ],
+      "answer_template": "洞洞板可以做的，特别适合入户和书房，收纳展示都方便。加我微信{{wechat_id}}，我发点洞洞板的案例给您看看？"
     },
     {
       "key": "wall_panel",
       "name": "护墙板",
       "can_do": true,
-      "keywords": ["护墙板", "墙板", "背景墙", "木饰面", "集成墙板"],
+      "keywords": [
+        "护墙板",
+        "墙板",
+        "背景墙",
+        "木饰面",
+        "集成墙板"
+      ],
       "yes_templates": [
         "护墙板我们做的，门墙柜一体，整体效果特别好。加我微信{{wechat_id}}，我发点护墙板案例给您看看？",
         "没问题，墙板我们经常做，可以跟柜子同色同材质，整体感很强。您加我微信{{wechat_id}}，我给您看看实景图。"
       ],
-      "no_templates": []
+      "no_templates": [],
+      "answer_template": "护墙板我们做的，门墙柜一体，整体效果特别好。加我微信{{wechat_id}}，我发点护墙板案例给您看看？"
     },
     {
       "key": "interior_door",
       "name": "室内门",
       "can_do": true,
-      "keywords": ["室内门", "房门", "卧室门", "木门", "房间门"],
+      "keywords": [
+        "室内门",
+        "房门",
+        "卧室门",
+        "木门",
+        "房间门"
+      ],
       "yes_templates": [
         "室内门我们也做的，可以跟柜子同色，整体效果特别好。加我微信{{wechat_id}}，我发点门的款式给您看看？",
         "没问题，我们做门墙柜一体的，门和柜子同色同材质，整体感很强。您加我微信{{wechat_id}}，我给您看看款式。"
       ],
-      "no_templates": []
+      "no_templates": [],
+      "answer_template": "室内门我们也做的，可以跟柜子同色，整体效果特别好。加我微信{{wechat_id}}，我发点门的款式给您看看？"
     },
     {
       "key": "door_frame",
       "name": "门窗套",
       "can_do": true,
-      "keywords": ["门套", "窗套", "门窗套", "垭口", "包窗口", "包门口"],
+      "keywords": [
+        "门套",
+        "窗套",
+        "门窗套",
+        "垭口",
+        "包窗口",
+        "包门口"
+      ],
       "yes_templates": [
         "门套窗套我们都做的，可以跟门和柜子同色，整体效果特别好。加我微信{{wechat_id}}，我给您报个价？",
         "没问题，门窗套是我们的常规项目，可以跟木门同色同材质。您加我微信{{wechat_id}}，我给您算算价格。"
       ],
-      "no_templates": []
+      "no_templates": [],
+      "answer_template": "门套窗套我们都做的，可以跟门和柜子同色，整体效果特别好。加我微信{{wechat_id}}，我给您报个价？"
     },
     {
       "key": "glass_door",
       "name": "玻璃门",
       "can_do": true,
-      "keywords": ["玻璃门", "玻璃柜门", "透明门"],
+      "keywords": [
+        "玻璃门",
+        "玻璃柜门",
+        "透明门"
+      ],
       "yes_templates": [
         "玻璃门可以做的，酒柜书柜用玻璃门显得档次高。加我微信{{wechat_id}}，我发点玻璃门案例给您看看？",
         "没问题，玻璃门我们常做，有灰玻、茶玻、长虹玻璃好几种。您加我微信{{wechat_id}}，我给您看看款式。"
       ],
-      "no_templates": []
+      "no_templates": [],
+      "answer_template": "玻璃门可以做的，酒柜书柜用玻璃门显得档次高。加我微信{{wechat_id}}，我发点玻璃门案例给您看看？"
     },
     {
       "key": "aluminum_frame",
       "name": "铝框门",
       "can_do": true,
-      "keywords": ["铝框门", "铝合金门", "极简门", "窄边门"],
+      "keywords": [
+        "铝框门",
+        "铝合金门",
+        "极简门",
+        "窄边门"
+      ],
       "yes_templates": [
         "铝框门也做的，现在很流行这种极简风格，效果特别好。加我微信{{wechat_id}}，我发点铝框门案例给您看看？",
         "没问题，铝框玻璃门我们经常做，有黑色、金色、灰色几种边框。您加我微信{{wechat_id}}，我给您看看实拍图。"
       ],
-      "no_templates": []
+      "no_templates": [],
+      "answer_template": "铝框门也做的，现在很流行这种极简风格，效果特别好。加我微信{{wechat_id}}，我发点铝框门案例给您看看？"
     }
   ]
 }

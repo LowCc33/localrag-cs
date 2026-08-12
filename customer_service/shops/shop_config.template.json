@@ -45,7 +45,10 @@
         "price": 0,
         "is_default": true,
         "is_premium": false,
-        "keywords": ["颗粒板", "刨花板"]
+        "keywords": [
+          "颗粒板",
+          "刨花板"
+        ]
       },
       {
         "key": "multi_layer_board",
@@ -55,7 +58,10 @@
         "price": 0,
         "is_default": false,
         "is_premium": true,
-        "keywords": ["多层板", "胶合板"]
+        "keywords": [
+          "多层板",
+          "胶合板"
+        ]
       }
     ]
   },
@@ -93,13 +99,17 @@
       "key": "hole_board",
       "name": "洞洞板",
       "can_do": true,
-      "keywords": ["洞洞板", "挂板"],
+      "keywords": [
+        "洞洞板",
+        "挂板"
+      ],
       "yes_templates": [
         "洞洞板可以做的，特别实用。加我微信{{wechat_id}}，我发点案例给您看看？"
       ],
       "no_templates": [
         "洞洞板我们不怎么做，不过可以做搁板替代，效果差不多。"
-      ]
+      ],
+      "answer_template": "洞洞板可以做的，特别实用。加我微信{{wechat_id}}，我发点案例给您看看？"
     }
   ]
 }

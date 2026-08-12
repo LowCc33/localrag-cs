@@ -92,7 +92,8 @@ customer_service/shops/
 | name | string | 工艺中文名 |
 | can_do | boolean | 能不能做 |
 | keywords | array | 匹配关键词列表 |
-| yes_templates | array | 能做的话术模板（支持 jinja2 变量） |
+| answer_template | string | **【推荐】** 工艺问答的主模板（全局直答层优先用这个） |
+| yes_templates | array | 能做的话术模板列表（系统内置工艺匹配用，随机抽一个） |
 | no_templates | array | 不能做的话术模板（可空，空的话用兜底话术） |
 
 示例：
