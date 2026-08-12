@@ -921,6 +921,64 @@ class CustomerServiceEngine:
                 return room_key, scene_name
         return None, None
 
+    def _detect_room_types(self, text):
+        """
+        检测用户提到的所有房间/使用场景（返回列表，支持多场景）
+        返回：list of (scene_key, scene_name)，按命中顺序排列
+        - 去重：同一个场景不重复返回
+        - 数量上限：4个（太多了话术太长）
+        - 全屋优先：如果命中了 whole_house，直接返回全屋单个场景（不拆）
+        """
+        room_patterns = [
+            ("kids_room", [
+                "儿童房", "小孩房", "宝宝房", "孩子房间", "儿童衣柜", "孩子用",
+                "儿童", "小孩", "宝宝", "儿子房", "女儿房",
+            ]),
+            ("tatami", [
+                "榻榻米", "地台", "踏踏米", "和室", "书房",
+            ]),
+            ("kitchen", [
+                "厨房", "橱柜", "厨柜", "厨房柜子", "灶台", "吊柜",
+            ]),
+            ("bathroom", [
+                "卫生间", "洗手间", "卫浴柜", "浴室柜", "洗手台", "卫浴",
+            ]),
+            ("balcony", [
+                "阳台", "阳台柜", "洗衣柜", "洗衣机柜", "晾衣架",
+            ]),
+            ("shoe_cabinet", [
+                "鞋柜", "玄关", "入户", "门厅", "玄关柜", "酒柜", "门厅柜", "入户柜",
+            ]),
+            ("living_room", [
+                "客厅", "电视柜", "餐边柜", "背景墙",
+            ]),
+            ("whole_house", [
+                "全屋", "整套", "整体", "全套", "家里", "整屋",
+            ]),
+            ("bedroom_wardrobe", [
+                "卧室", "主卧", "次卧", "衣柜", "大衣柜", "衣帽间",
+                "大衣橱", "衣橱",
+            ]),
+        ]
+
+        results = []
+        seen_keys = set()
+
+        for room_key, keywords in room_patterns:
+            if any(kw in text for kw in keywords):
+                # 全屋优先，命中了就直接返回单个全屋
+                if room_key == "whole_house":
+                    scene_name = self.rec_matrix.get("scene_names", {}).get(room_key, room_key)
+                    return [(room_key, scene_name)]
+                if room_key not in seen_keys:
+                    scene_name = self.rec_matrix.get("scene_names", {}).get(room_key, room_key)
+                    results.append((room_key, scene_name))
+                    seen_keys.add(room_key)
+                    if len(results) >= 4:
+                        break
+
+        return results
+
     def _detect_preference_type(self, text):
         """
         检测用户在选材料阶段的偏好类型
@@ -1037,6 +1095,269 @@ class CustomerServiceEngine:
             "scene_name": scene_name,
             "preference": preference,
             "follow_up": follow_up,
+        }
+
+    # ---------- 多场景分场景推荐 ----------
+    def _join_scene_names(self, scene_names):
+        """
+        拼接场景名列表为口语化字符串
+        1个：直接返回
+        2个：A和B
+        3-4个：A、B和C
+        5个以上：A、B等N个地方
+        """
+        n = len(scene_names)
+        if n == 0:
+            return ""
+        if n == 1:
+            return scene_names[0]
+        if n == 2:
+            return f"{scene_names[0]}和{scene_names[1]}"
+        if n <= 4:
+            return "、".join(scene_names[:-1]) + f"和{scene_names[-1]}"
+        # 5个以上
+        return f"{scene_names[0]}、{scene_names[1]}等{n}个地方"
+
+    def _get_scene_recommendation(self, scene_key, preference="cost_effective"):
+        """
+        查单个场景的推荐板材
+        返回：(material_key, material_name, material_price, reason) 或 (None, None, None, None)
+        """
+        from customer_service.shop_config_loader import get_material_name, get_material_price
+
+        matrix = self.rec_matrix.get("matrix", {})
+        scene_cfg = matrix.get(scene_key, {})
+        pref_cfg = scene_cfg.get(preference)
+
+        if not pref_cfg:
+            # 没有这个偏好的配置，降级用 cost_effective
+            pref_cfg = scene_cfg.get("cost_effective")
+
+        if not pref_cfg:
+            return None, None, None, None
+
+        material_key = pref_cfg.get("material")
+        reason = pref_cfg.get("reason", "")
+        material_name = get_material_name(material_key, self.config)
+        material_price = get_material_price(self.config, material_key)
+
+        return material_key, material_name, material_price, reason
+
+    def _build_multi_scene_answer(self, scene_data_list, has_selected=False):
+        """
+        根据多场景推荐结果，生成口语化回答话术
+        三种模式：全部一致 / 部分推翻 / 全部推翻
+        分级输出：1-2个逐个说，3个以上按板材分组，5个以上精简归类
+
+        scene_data_list: list of dict，每个包含:
+            scene_key, scene_name, recommended_material, material_name,
+            material_price, is_same_as_selected, reason
+        has_selected: bool，用户是否已经选了板材（决定话术语气）
+
+        返回：完整话术字符串
+        """
+        if not scene_data_list:
+            return ""
+
+        n = len(scene_data_list)
+        has_upgrade = any(not s.get("is_same_as_selected", True) for s in scene_data_list)
+
+        # 场景名列表
+        scene_names = [s["scene_name"] for s in scene_data_list]
+
+        # ===== 1-2个场景：逐个推荐 =====
+        if n <= 2:
+            lines = []
+            for i, s in enumerate(scene_data_list):
+                if has_selected and s["is_same_as_selected"]:
+                    # 适合已选板材
+                    line = f"{s['scene_name']}用{s['material_name']}没问题，{s['reason']}。"
+                elif has_selected and not s["is_same_as_selected"]:
+                    # 不适合，推荐换
+                    line = (
+                        f"但{s['scene_name']}我建议用{s['material_name']}，"
+                        f"{s['material_price']}一平，{s['reason']}。"
+                    )
+                else:
+                    # 没有已选，直接推荐
+                    line = (
+                        f"{s['scene_name']}用{s['material_name']}，"
+                        f"{s['material_price']}一平，{s['reason']}。"
+                    )
+                lines.append(line)
+
+            answer = "\n".join(lines)
+
+        # ===== 3个及以上：按板材分组 =====
+        elif n <= 4:
+            # 按推荐板材分组
+            groups = {}
+            for s in scene_data_list:
+                mk = s["recommended_material"]
+                if mk not in groups:
+                    groups[mk] = {
+                        "material_name": s["material_name"],
+                        "material_price": s["material_price"],
+                        "scenes": [],
+                        "reason": s["reason"],
+                    }
+                groups[mk]["scenes"].append(s["scene_name"])
+
+            lines = ["我给您分两类说："]
+            for _, g in groups.items():
+                scenes_text = "、".join(g["scenes"])
+                reason = g["reason"]
+                # 同组多个场景用更通用的理由
+                if len(g["scenes"]) > 1:
+                    reason = self._get_generic_reason(g["material_name"], scene_data_list)
+                lines.append(
+                    f"· {g['material_name']}（{g['material_price']}/平）：{scenes_text}用这个，{reason}"
+                )
+
+            answer = "\n".join(lines)
+
+        # ===== 5个及以上：精简输出，按功能归类 =====
+        else:
+            # 简单分成两类：适合颗粒板的（干燥地方）和需要多层板的（潮湿地方）
+            # 这里用板材价格区分：低价=干燥地方用，高价=潮湿地方用
+            dry_scenes = []
+            wet_scenes = []
+            dry_material = None
+            wet_material = None
+            dry_price = None
+            wet_price = None
+
+            for s in scene_data_list:
+                if s["recommended_material"] in ("particle_board", "osb", "ecological_board"):
+                    dry_scenes.append(s["scene_name"])
+                    if not dry_material:
+                        dry_material = s["material_name"]
+                        dry_price = s["material_price"]
+                else:
+                    wet_scenes.append(s["scene_name"])
+                    if not wet_material:
+                        wet_material = s["material_name"]
+                        wet_price = s["material_price"]
+
+            lines = ["您这柜子不少啊，我给您简单说下："]
+
+            if dry_scenes:
+                # 只说前两个代表，后面说等
+                if len(dry_scenes) <= 3:
+                    dry_text = "、".join(dry_scenes)
+                else:
+                    dry_text = f"{dry_scenes[0]}、{dry_scenes[1]}等干燥的地方"
+                lines.append(f"· {dry_material}（{dry_price}/平）：{dry_text}都够用，性价比最高")
+
+            if wet_scenes:
+                if len(wet_scenes) <= 3:
+                    wet_text = "、".join(wet_scenes)
+                else:
+                    wet_text = f"{wet_scenes[0]}等潮湿的地方"
+                lines.append(f"· {wet_material}（{wet_price}/平）：{wet_text}得用这个，防潮耐用")
+
+            lines.append("具体的等设计师上门给您细算，保证给您搭配好。")
+            answer = "\n".join(lines)
+
+        # ===== 结尾：确认 + 推进 =====
+        if has_selected and has_upgrade:
+            follow_up = "\n您看这个搭配行不？大概做多大？"
+        elif has_selected and not has_upgrade:
+            follow_up = f"\n{self._join_scene_names(scene_names)}用这个材料都没问题。您看可以不？大概做多大？"
+        else:
+            follow_up = "\n您看这个搭配可以不？大概做多大？"
+
+        return answer + follow_up
+
+    def _get_generic_reason(self, material_name, scene_data_list):
+        """
+        给同组板材生成一个通用理由（多个场景共用时）
+        根据板材名简单判断
+        """
+        material_key = ""
+        for s in scene_data_list:
+            if s["material_name"] == material_name:
+                material_key = s["recommended_material"]
+                break
+
+        reason_map = {
+            "particle_board": "性价比最高，预算有限首选",
+            "osb": "结构稳定，承重力强",
+            "multi_layer_board": "防潮耐用，哪个房间都能用",
+            "ecological_board": "环保等级最高，住得放心",
+            "solid_wood": "质感最好，追求品质首选",
+        }
+        return reason_map.get(material_key, "各方面都不错，家用合适")
+
+    def _multi_scene_recommendation(self, text, selected_material=None, preference=None):
+        """
+        多场景分场景推荐主函数
+
+        输入：
+          text: 用户输入文本
+          selected_material: 已选板材key（用户已经选了的话）
+          preference: 偏好类型（cost_effective/eco_friendly等，没有的话用性价比）
+
+        返回：dict 或 None
+        dict结构：
+        {
+          "scenes": [...],  # 每个场景的推荐详情
+          "has_upgrade": bool,  # 是否有升级/更换推荐
+          "answer": str,  # 生成好的完整话术
+          "follow_up": str,  # 跟进提问
+        }
+        """
+        # 1. 检测所有场景
+        room_types = self._detect_room_types(text)
+
+        # 场景数 < 2 → 返回None，走单场景逻辑
+        if len(room_types) < 2:
+            return None
+
+        # 全屋场景只有1个的话，也不走多场景
+        if len(room_types) == 1 and room_types[0][0] == "whole_house":
+            return None
+
+        # 2. 默认偏好 = 性价比（如果没指定）
+        if not preference:
+            preference = "cost_effective"
+
+        # 3. 逐个场景查推荐
+        scenes = []
+        for scene_key, scene_name in room_types:
+            mat_key, mat_name, mat_price, reason = self._get_scene_recommendation(
+                scene_key, preference
+            )
+            if not mat_key:
+                continue
+
+            is_same = True
+            if selected_material:
+                is_same = (mat_key == selected_material)
+
+            scenes.append({
+                "scene_key": scene_key,
+                "scene_name": scene_name,
+                "recommended_material": mat_key,
+                "material_name": mat_name,
+                "material_price": mat_price,
+                "is_same_as_selected": is_same,
+                "reason": reason,
+            })
+
+        if len(scenes) < 2:
+            return None
+
+        # 4. 生成话术
+        has_selected = selected_material is not None
+        has_upgrade = any(not s["is_same_as_selected"] for s in scenes)
+        answer = self._build_multi_scene_answer(scenes, has_selected)
+
+        return {
+            "scenes": scenes,
+            "has_upgrade": has_upgrade,
+            "answer": answer,
+            "follow_up": "您这些柜子加起来大概多大？",
         }
 
     # ---------- 议价状态机：嫌贵/竞品 回怼检测 ----------
@@ -1928,11 +2249,11 @@ class CustomerServiceEngine:
         根据当前bargain_step决定问什么
         """
         if self.bargain_step == 1:
-            # 刚报完区间，问选材料还是面积
+            # 刚报完区间，一步到位问两个：偏好 + 场景
             templates = [
-                "对了，您打算选什么材料呀？",
-                "您柜子大概做多大？我给您算总价。",
-                "您家用在哪个房间？我给您推荐最适合的。",
+                "您更看重性价比还是环保呀？主要做哪些柜子？我给您好好推荐推荐。",
+                "主要看您看重哪方面，还有做哪些地方的柜子。您跟我说说，我给您推荐最合适的。",
+                "您家主要做哪些柜子呀？看重性价比还是环保？我给您好好算算。",
             ]
             return random.choice(templates)
         elif self.bargain_step == 2:
@@ -2199,6 +2520,39 @@ class CustomerServiceEngine:
                     "bargain_material_price", material=material
                 )
 
+            # ===== 多场景推荐检测（优先级最高，在单场景推荐之前）=====
+            room_types = self._detect_room_types(text)
+            pref_type = self._detect_preference_type(text)
+
+            # 有 >=2 个场景 + 有偏好 → 直接走多场景推荐
+            if len(room_types) >= 2 and pref_type:
+                multi_rec = self._multi_scene_recommendation(
+                    text, selected_material=None, preference=pref_type
+                )
+                if multi_rec:
+                    self.bargain_step = 2
+                    self.selected_material = multi_rec["scenes"][0]["recommended_material"]
+                    self.bargain_pullback_count = 0
+                    return "bargain/multi_scene_recommend", multi_rec["answer"]
+
+            # ===== 只有场景，没有偏好 → 追问偏好 =====
+            if len(room_types) >= 1 and not pref_type and not material:
+                ask_pref_templates = [
+                    "好的，那您更看重性价比还是环保呀？我给您挑最合适的。",
+                    "了解，您主要看重哪方面？性价比还是环保？",
+                    "好的，您对板材有什么要求吗？看重环保还是性价比？",
+                ]
+                return "bargain/ask_preference", random.choice(ask_pref_templates)
+
+            # ===== 只有偏好，没有场景 → 追问场景 =====
+            if pref_type and len(room_types) == 0 and not material:
+                ask_scene_templates = [
+                    "好的，那您主要做哪些柜子呀？不同地方用的材料不一样。",
+                    "了解，您家做哪些地方的柜子？我给您推荐最合适的。",
+                    "好的，您主要用在哪些房间？我给您针对性推荐。",
+                ]
+                return "bargain/ask_scene", random.choice(ask_scene_templates)
+
             # ===== 二维推荐矩阵（场景 × 偏好）=====
             rec_result = self._get_recommendation(text)
             if rec_result:
@@ -2247,16 +2601,19 @@ class CustomerServiceEngine:
                 self.bargain_step = 3
                 self.bargain_pullback_count = 0
                 return "bargain/probe", self._render_bargain_template("bargain_probe")
-            # 用户说了面积 → 按默认材料报价
+
+            # 用户说了面积 → 按默认材料报价，进step2
             if size_val:
                 self.bargain_step = 2
                 default_mat = self.config.get("default_material", "particle_board")
+                self.selected_material = default_mat
                 return "bargain/material_price", self._render_bargain_template(
                     "bargain_material_price", material=default_mat
                 )
             # 其他 → 推荐主推款，推进到step2
             self.bargain_pullback_count = 0
             main_mat = self.config.get("main_material", "multi_layer_board")
+            self.selected_material = main_mat
             self.bargain_step = 2
             return "bargain/material_price", self._render_bargain_template(
                 "bargain_material_price", material=main_mat
@@ -2287,6 +2644,20 @@ class CustomerServiceEngine:
                 return "bargain/material_price", self._render_bargain_template(
                     "bargain_material_price", material=material
                 )
+
+            # ===== Step2 多场景推荐：用户说了多个场景，逐个判断是否适合已选板材 =====
+            room_types = self._detect_room_types(text)
+            if len(room_types) >= 2 and self.selected_material:
+                multi_rec = self._multi_scene_recommendation(
+                    text, selected_material=self.selected_material
+                )
+                if multi_rec:
+                    self.bargain_pullback_count = 0
+                    # 如果有升级推荐，更新 selected_material 为第一个推荐的（主推荐）
+                    if multi_rec["has_upgrade"]:
+                        pass  # 先不改，保持用户选的，只做推荐建议
+                    return "bargain/multi_scene_step2", multi_rec["answer"]
+
             # 用户说了面积 → 直接给优惠价，跳step4
             if size_val:
                 self.bargain_step = 4
