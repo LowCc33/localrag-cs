@@ -1,0 +1,195 @@
+# 二维推荐矩阵配置
+# 场景 × 偏好 → 推荐材料 + 推荐理由
+# material 对应 shop_config.pricing 中的材料 key
+# reason 是话术里的推荐理由（模板变量 {{recommend_reason}}）
+# 以后改推荐策略只改这个文件，不用动代码
+
+# 场景中文名映射（供检测函数返回 scene_name 用）
+scene_names:
+  bedroom_wardrobe: "卧室衣柜"
+  kids_room: "儿童房"
+  kitchen: "厨房"
+  bathroom: "卫生间"
+  balcony: "阳台"
+  shoe_cabinet: "鞋柜"
+  tatami: "榻榻米"
+  living_room: "客厅"
+  whole_house: "全屋"
+
+# 偏好中文名映射
+preference_names:
+  cost_effective: "性价比"
+  eco_friendly: "环保"
+  balanced: "均衡"
+  quality: "品质"
+  recommend_me: "推荐"
+
+# 场景化跟进提问（推荐完顺势问需求，推进转化）
+scene_follow_up:
+  bedroom_wardrobe: "您衣柜大概做多大？"
+  kids_room: "您儿童房大概几个平方？"
+  kitchen: "您厨房大概几米？"
+  bathroom: "卫生间大概多大？"
+  balcony: "阳台柜大概做多长？"
+  shoe_cabinet: "您鞋柜大概做多大？"
+  tatami: "大概做几个平方？"
+  living_room: "您客厅柜子大概做多大？"
+  whole_house: "您房子多大面积？"
+  default: "您大概做几个柜子啊？"
+
+# ========== 二维推荐矩阵主体 ==========
+# 结构：scene_key -> preference_key -> {material, reason}
+
+matrix:
+  bedroom_wardrobe:
+    cost_effective:
+      material: particle_board
+      reason: "卧室干燥，颗粒板完全够用，性价比最高"
+    eco_friendly:
+      material: ecological_board
+      reason: "自己住天天待着，生态板最环保，放心"
+    balanced:
+      material: multi_layer_board
+      reason: "多层板家用最均衡，防潮耐用都不错"
+    quality:
+      material: solid_wood
+      reason: "追求品质就实木的，质感和环保都是顶级"
+    recommend_me:
+      material: multi_layer_board
+      reason: "我推荐多层板，家用卖得最多，不会踩坑"
+
+  kids_room:
+    cost_effective:
+      material: multi_layer_board
+      reason: "儿童房性价比选多层板，环保耐用都过关"
+    eco_friendly:
+      material: ecological_board
+      reason: "孩子房间必须生态板，ENF级零甲醛添加，天天在里面待着，这个不能省"
+    balanced:
+      material: ecological_board
+      reason: "孩子住的地方，生态板最放心，贵不了多少"
+    quality:
+      material: solid_wood
+      reason: "追求最好的就实木，完全不用担心环保"
+    recommend_me:
+      material: ecological_board
+      reason: "孩子房间我推荐生态板，环保第一，不能省"
+
+  kitchen:
+    cost_effective:
+      material: multi_layer_board
+      reason: "厨房潮湿，必须多层板，颗粒板见潮气容易胀"
+    eco_friendly:
+      material: multi_layer_board
+      reason: "厨房推荐多层板，防潮还环保，ENF级没问题"
+    balanced:
+      material: multi_layer_board
+      reason: "厨房多层板是标配，防潮耐用，不会错"
+    quality:
+      material: multi_layer_board
+      reason: "厨房首推多层板，防潮耐用，再好点可以做不锈钢柜体"
+    recommend_me:
+      material: multi_layer_board
+      reason: "厨房我推荐多层板，防潮耐用，家家户户都用这个"
+
+  bathroom:
+    cost_effective:
+      material: multi_layer_board
+      reason: "卫生间潮，必须多层板，其他的容易发霉发胀"
+    eco_friendly:
+      material: multi_layer_board
+      reason: "卫生间首推多层板，防潮还环保"
+    balanced:
+      material: multi_layer_board
+      reason: "卫生间多层板是标配，防潮防水，不会错"
+    quality:
+      material: multi_layer_board
+      reason: "卫生间就用多层板（防潮板），再高端可以做蜂窝铝"
+    recommend_me:
+      material: multi_layer_board
+      reason: "卫生间我推荐多层板，防潮防水，用个十年八年没问题"
+
+  balcony:
+    cost_effective:
+      material: multi_layer_board
+      reason: "阳台日晒雨淋的，多层板抗造，颗粒板容易变形"
+    eco_friendly:
+      material: multi_layer_board
+      reason: "阳台推荐多层板，防潮抗变形还环保"
+    balanced:
+      material: multi_layer_board
+      reason: "阳台多层板是标配，日晒雨淋都不怕"
+    quality:
+      material: multi_layer_board
+      reason: "阳台就多层板，再好点可以做全铝的"
+    recommend_me:
+      material: multi_layer_board
+      reason: "阳台我推荐多层板，防潮抗变形，用得住"
+
+  shoe_cabinet:
+    cost_effective:
+      material: particle_board
+      reason: "鞋柜颗粒板就行，不常用，性价比最高"
+    eco_friendly:
+      material: multi_layer_board
+      reason: "鞋柜要环保的话多层板也可以，其实颗粒板ENF级也够用"
+    balanced:
+      material: particle_board
+      reason: "鞋柜一般用颗粒板就行，够用了"
+    quality:
+      material: multi_layer_board
+      reason: "品质好点就多层板，质感不一样"
+    recommend_me:
+      material: particle_board
+      reason: "鞋柜我推荐颗粒板，性价比最高，完全够用"
+
+  tatami:
+    cost_effective:
+      material: multi_layer_board
+      reason: "榻榻米要承重，推荐多层板，性价比高还结实"
+    eco_friendly:
+      material: ecological_board
+      reason: "榻榻米天天坐人躺人，生态板最环保，放心"
+    balanced:
+      material: multi_layer_board
+      reason: "榻榻米多层板最常用，承重好，性价比也不错"
+    quality:
+      material: ecological_board
+      reason: "榻榻米用好点的就生态板，环保加承重都到位"
+    recommend_me:
+      material: multi_layer_board
+      reason: "榻榻米我推荐多层板，承重好，性价比也高"
+
+  living_room:
+    cost_effective:
+      material: particle_board
+      reason: "客厅柜子颗粒板就行，性价比高，够用了"
+    eco_friendly:
+      material: ecological_board
+      reason: "客厅天天待着，生态板环保好，放心"
+    balanced:
+      material: multi_layer_board
+      reason: "客厅多层板最均衡，展示效果也好"
+    quality:
+      material: solid_wood
+      reason: "客厅门面，实木的质感和档次完全不一样"
+    recommend_me:
+      material: multi_layer_board
+      reason: "客厅我推荐多层板，展示效果和性价比都不错"
+
+  whole_house:
+    cost_effective:
+      material: particle_board
+      reason: "全屋性价比就颗粒板，兔宝宝ENF级，家用完全够用"
+    eco_friendly:
+      material: ecological_board
+      reason: "全屋都用生态板的话，环保最到位，装完晾一个月就能住"
+    balanced:
+      material: multi_layer_board
+      reason: "全屋多层板是万金油，哪个房间都能用，防潮也比颗粒板强"
+    quality:
+      material: solid_wood
+      reason: "全屋实木就是顶配了，质感环保都是顶级"
+    recommend_me:
+      material: multi_layer_board
+      reason: "全屋的话我推荐多层板，万金油，哪个房间都能用，卖得最多"

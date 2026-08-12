@@ -1,0 +1,115 @@
+{
+  "basic_info": {
+    "shop_name": "合肥尚美全屋定制",
+    "boss_name": "张师傅",
+    "years_in_business": 12,
+    "city": "合肥",
+    "shop_location": "合肥市包河区望湖美家居二楼B区218号",
+    "wechat_id": "13955118888",
+    "after_sales_phone": "0551-6555-8888",
+    "default_material": "particle_board",
+    "main_material": "multi_layer_board"
+  },
+  "pricing": {
+    "base_price_method": "投影面积",
+    "particle_board_price": 799,
+    "multi_layer_board_price": 1099,
+    "osb_board_price": 999,
+    "ecological_board_price": 1199,
+    "solid_wood_price": 1699,
+    "drawer_price": 199,
+    "visible_panel_price": 299,
+    "handle_price": 39,
+    "measurement_fee": 200,
+    "installation_fee": "免费（市区内包安装）",
+    "delivery_fee": "免费（市区内包运输）",
+    "design_fee": "免费（下定后免费出设计图）"
+  },
+  "materials": {
+    "default_board_brand": "兔宝宝颗粒板",
+    "default_eco_level": "ENF级",
+    "default_edge_band": "PUR封边",
+    "default_hardware_brand": "DTC东泰",
+    "available_boards": [
+      "兔宝宝颗粒板ENF级",
+      "兔宝宝多层板ENF级",
+      "万华禾香板ENF级",
+      "鲁丽欧松板ENF级",
+      "橡胶木指接板"
+    ],
+    "available_edge_bands": [
+      "EVA封边",
+      "PUR封边（标配）",
+      "激光封边（加价升级）"
+    ],
+    "available_hardware": [
+      "DTC东泰（标配）",
+      "百隆Blum（升级加钱）",
+      "海蒂诗Hettich（升级加钱）"
+    ],
+    "board_names": {
+      "particle_board": "颗粒板",
+      "osb_board": "欧松板",
+      "multi_layer_board": "多层板",
+      "ecological_board": "生态板",
+      "solid_wood": "实木板"
+    }
+  },
+  "service": {
+    "warranty_years": 5,
+    "production_cycle_days": "30-40",
+    "install_days": "1-2",
+    "design_days": "3-5",
+    "deposit_ratio": "50%",
+    "refundable": true,
+    "rush_available": true,
+    "free_design": true,
+    "free_measurement": true,
+    "after_sales_scope": "柜体5年质保，五金终身质保，终身维护",
+    "production": {
+      "design_output_per_day": 30,
+      "install_output_per_day": 20,
+      "chai_dan_days": 2,
+      "production_base_days": 15,
+      "production_per_10sqm_days": 1,
+      "design_min_days": 3,
+      "install_min_days": 1
+    }
+  },
+  "sales_script": {
+    "welcome_text": "您好！我是合肥尚美全屋定制的客服小张，很高兴为您服务。请问您是想咨询柜子定制吗？😊",
+    "selling_points": [
+      "我们板材用的是兔宝宝ENF级的，环保检测报告随便看，装完就能住",
+      "五金是DTC东泰的，终身质保，坏了一个电话24小时上门换",
+      "封边标配PUR的，防潮不开胶，用十几年没问题",
+      "安装师傅都是跟了我们5年以上的老师傅，手艺有保障",
+      "本地工厂，合肥市区免费测量免费设计，售后响应快"
+    ],
+    "concessions": [
+      "现在下定送全屋智能感应灯带",
+      "本月活动价799一平，比平时便宜200",
+      "满20平米送2平米背景墙",
+      "厨房石英石台面免费升级加厚款"
+    ],
+    "urgency_factors": [
+      "这个月活动月底就结束，下个月要涨价",
+      "厂家这个月有返点政策，过了就没了",
+      "师傅档期快排满了，现在下定能赶在9月装完",
+      "板材最近要涨价，早下定早锁定价格"
+    ],
+    "lead_hooks": [
+      "加我微信13955118888，我把详细报价表发你",
+      "加我微信13955118888，我把材料样册发你看看",
+      "加我微信13955118888，我发你几个你们小区的业主案例",
+      "加我微信13955118888，我让设计师给你算个精准预算",
+      "加我微信13955118888，我把检测报告发你看看"
+    ],
+    "community_cases": [
+      "滨湖世纪城",
+      "政务区华润凯旋门",
+      "高新区保利西山林语",
+      "蜀山区万科金色名郡",
+      "包河区绿地海顿公馆"
+    ]
+  }
+}

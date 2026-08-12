@@ -31,6 +31,14 @@ edge_band: PUR封边              # 封边工艺
 hardware_brand: DTC五金         # 五金品牌
 eco_level: ENF级                # 环保等级
 
+# 材料中文名映射（模板渲染和推荐矩阵都用这个）
+board_names:
+  particle_board: "颗粒板"
+  osb_board: "欧松板"
+  multi_layer_board: "多层板"
+  ecological_board: "生态板"
+  solid_wood: "实木板"
+
 # ==================== 工艺能力配置 ====================
 # 客户问某项工艺能不能做时，查这里判断走"能做"还是"替代方案"话术
 # 全部为 bool 类型，商家根据自身能力修改

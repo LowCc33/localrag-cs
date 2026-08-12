@@ -86,6 +86,7 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
         "edge_band": materials.get("default_edge_band", ""),
         "hardware_brand": materials.get("default_hardware_brand", ""),
         "eco_level": materials.get("default_eco_level", ""),
+        "board_names": materials.get("board_names", MATERIAL_NAME_MAP),
 
         # === 价格信息（供议价状态机用） ===
         "_pricing": pricing,  # 原始价格表，内部方法用
@@ -179,8 +180,12 @@ MATERIAL_PRICE_KEY_MAP = {
 }
 
 
-def get_material_name(material_key: str) -> str:
-    """材料key转中文名"""
+def get_material_name(material_key: str, config: dict = None) -> str:
+    """材料key转中文名，优先从配置 board_names 里取，没有则用内置映射"""
+    if config:
+        board_names = config.get("board_names", {})
+        if material_key in board_names:
+            return board_names[material_key]
     return MATERIAL_NAME_MAP.get(material_key, material_key)
 
 

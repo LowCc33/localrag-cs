@@ -29,7 +29,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # 商家配置加载器（支持多商家私有配置）
 from customer_service.shop_config_loader import (
     load_shop_config, get_price_range, get_materials_list_text,
-    get_material_price, get_material_name, MATERIAL_PRICE_KEY_MAP
+    get_material_price, get_material_name
 )
 
 
@@ -45,6 +45,9 @@ class CustomerServiceEngine:
         self.shop_id = shop_id
         with open(os.path.join(BASE_DIR, "templates.yaml"), encoding="utf-8") as f:
             self.templates = yaml.safe_load(f)
+        # 加载二维推荐矩阵（场景 × 偏好 → 材料 + 理由）
+        with open(os.path.join(BASE_DIR, "recommendation_matrix.yaml"), encoding="utf-8") as f:
+            self.rec_matrix = yaml.safe_load(f)
         # 根据 shop_id 加载对应商家配置（None 则用默认配置）
         self.config = load_shop_config(shop_id)
         self.history = []                # 上下文记忆，最多留 3 轮
@@ -52,7 +55,7 @@ class CustomerServiceEngine:
         self.end_streak = 0              # 连续结束语计数器（对话结束判断用）
         self.bargain_step = 0            # 议价状态机：0=未开始 1=报区间 2=报实价 3=摸底 4=已优惠 5+=升级
         self.bargain_pullback_count = 0  # 拉回正题计数器，连续2轮不正面回答就引导加微信
-        self.llm_fallback_streak = 0     # LLM兜底连续次数（盲区检测用）
+        self.selected_material = None    # 当前选中/推荐的材料key（Step2及以后有值）
         self.llm_fallback_streak = 0     # LLM兜底连续次数（盲区检测用）
 
     # ---------- 通用辅助：抽取变量 + 渲染模板 ----------
@@ -79,11 +82,13 @@ class CustomerServiceEngine:
             "edge_band": self.config["edge_band"],
             "hardware_brand": self.config["hardware_brand"],
             "eco_level": self.config["eco_level"],
+            "warranty_years": self.config.get("warranty_years", "5"),
             # —— 嵌套配置对象（模板里用点号访问） ——
             "process_capability": self.config.get("process_capability", {}),
             "payment_terms": self.config.get("payment_terms", {}),
             "production_cycle": self.config.get("production_cycle", {}),
             "trust_points": self.config.get("trust_points", {}),
+            "pricing": self.config.get("_pricing", {}),
             # —— 随机抽取池（每次渲染抽一个） ——
             "concessions": random.choice(self.config.get("concessions", [""])),
             "urgency": random.choice(self.config.get("urgency_factors", [""])),
@@ -393,7 +398,6 @@ class CustomerServiceEngine:
 
         核心原则：每一步都有闭环，接不住也有兜底，绝对不跑丢
         """
-        is_price = self._is_price_question(text)
         is_bargain = self._is_bargain_question(text)
         is_end = self._is_end_conversation(text)
         size_val, input_type, raw_qty = self._detect_order_size(text)
@@ -430,91 +434,76 @@ class CustomerServiceEngine:
             ans = self._append_lead_hook(ans)
             return size_val, ans
 
-        # ========== Step 0：初次进入：先报价格区间 ==========
+        # ========== Step 0：初次进入 ==========
+        # 纯问价 → 先报价格区间（step1）
+        # 砍价/要优惠 → 先摸底反问（step3），不直接报价
         if self.bargain_step == 0:
+            # 砍价意图优先 → 直接摸底（不管有没有说材料/面积，先问清楚需求再报价）
+            if is_bargain:
+                self.bargain_step = 3
+                self.bargain_pullback_count = 0
+                return "probe", self._render_bargain_template("bargain_probe")
+            # 纯问价格 → 报价格区间（step1）
             self.bargain_step = 1
             self.bargain_pullback_count = 0
             return "price_range", self._render_bargain_template("bargain_price_range")
+
+        # ========== 公共拦截：报过价之后（step>=1），先检测嫌贵/竞品回怼 ==========
+        # 命中就返回对应话术，状态不推进（砍价信号还是交给各Step自己判断是否推进）
+        if self.bargain_step >= 1:
+            pushback_result = self._detect_bargain_pushback(text)
+            if pushback_result is not None:
+                pushback_type, pushback_ans = pushback_result
+                # 嫌贵/竞品不算跑偏，不加 pullback 计数
+                return f"pushback/{pushback_type}", pushback_ans
 
         # ========== Step 1：等用户选材料 ==========
         if self.bargain_step == 1:
             # 明确选了材料 → 报实价，进step2
             if material:
                 self.bargain_step = 2
+                self.selected_material = material
                 self.bargain_pullback_count = 0
                 return "material_price", self._render_bargain_template(
                     "bargain_material_price", material=material
                 )
 
-            # 说了某个房间/场景 → 场景化推荐 + 进step2（相当于帮用户选了推荐材料）
-            room_type = self._detect_room_type(text)
-            if room_type:
-                # 场景推荐对应的默认材料
-                room_default_materials = {
-                    "kids_room": "ecological_board",    # 儿童房→生态板
-                    "kitchen": "multi_layer_board",    # 厨房→多层板
-                    "bathroom": "multi_layer_board",   # 卫生间/阳台→多层板
-                    "bedroom": "particle_board",        # 卧室→颗粒板（默认）
-                    "shoe_cabinet": "particle_board",   # 鞋柜等→颗粒板
-                    "tatami": "ecological_board",       # 榻榻米→生态板
-                }
-                default_mat = room_default_materials.get(
-                    room_type,
-                    self.config.get("default_material", "particle_board")
-                )
-                # 先渲染场景推荐模板
-                for hot_q in self.templates.get("hot_questions", []):
-                    if hot_q.get("category") == f"material_recommend_{room_type}":
-                        tpl_list = hot_q.get("templates", [])
-                        if tpl_list:
-                            recommend_text = self._render(tpl_list[0])
-                            self.bargain_step = 2
-                            self.bargain_pullback_count = 0
-                            return f"recommend/{room_type}", recommend_text
-                # 模板没找到就降级用材料报价
+            # ===== 二维推荐矩阵（场景 × 偏好）=====
+            # 优先级最高：用户说了场景或偏好，就直接走智能推荐
+            rec_result = self._get_recommendation(text)
+            if rec_result:
+                mat_key = rec_result["material"]
+                reason = rec_result["reason"]
+                follow_up = rec_result["follow_up"]
+                scene_key = rec_result["scene_key"]
+                # 记录选中的材料
+                self.selected_material = mat_key
+                # 推进到 step 2
                 self.bargain_step = 2
                 self.bargain_pullback_count = 0
-                return "material_price", self._render_bargain_template(
-                    "bargain_material_price", material=default_mat
+                # 渲染推荐话术（变量化模板）+ 场景化跟进提问
+                recommend_text = self._render_bargain_template(
+                    "bargain_recommendation_v2",
+                    material=mat_key,
+                    extra_vars={
+                        "recommend_reason": reason,
+                        "recommended_material_name": rec_result["material_name"],
+                        "recommended_material_price": str(rec_result["material_price"]),
+                        "board_brand": self.config.get("board_brand", ""),
+                        "eco_level": self.config.get("eco_level", ""),
+                        "hardware_brand": self.config.get("hardware_brand", ""),
+                        "edge_banding": self.config.get("edge_band", ""),
+                    }
                 )
-
-            # 说了性价比偏好 → 推荐颗粒板
-            if preference == "cost_effective":
-                self.bargain_step = 2
-                self.bargain_pullback_count = 0
-                return "material_price", self._render_bargain_template(
-                    "bargain_recommend_material",
-                    material="particle_board",
-                    extra_vars={"recommend_reason": "性价比"}
-                )
-
-            # 说了环保偏好 → 推荐生态板（只用前3条通用模板，避免"最便宜的"违和）
-            if preference == "eco_friendly":
-                self.bargain_step = 2
-                self.bargain_pullback_count = 0
-                return "material_price", self._render_bargain_template(
-                    "bargain_recommend_material",
-                    material="ecological_board",
-                    extra_vars={"recommend_reason": "环保"},
-                    max_index=3
-                )
-
-            # 平衡型/让推荐 → 推荐主推款（main_material，只用前3条通用模板）
-            if preference == "balanced":
-                main_mat = self.config.get("main_material", "multi_layer_board")
-                self.bargain_step = 2
-                self.bargain_pullback_count = 0
-                return "material_price", self._render_bargain_template(
-                    "bargain_recommend_material",
-                    material=main_mat,
-                    extra_vars={"recommend_reason": "综合考虑"},
-                    max_index=3
-                )
+                # 拼接场景化跟进提问
+                full_answer = recommend_text + "\n" + follow_up
+                return f"recommend/{scene_key}", full_answer
 
             # 只说了面积/数量没说材料 → 按默认材料报价，进step2
             if size_val:
                 default_mat = self.config.get("default_material", "particle_board")
                 self.bargain_step = 2
+                self.selected_material = default_mat
                 self.bargain_pullback_count = 0
                 return "material_price", self._render_bargain_template(
                     "bargain_material_price", material=default_mat
@@ -527,15 +516,12 @@ class CustomerServiceEngine:
                     return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
                 return "price_range", self._render_bargain_template("bargain_price_range")
 
-            # 以上都没命中 → 推荐主推款（比追问更能推进转化）
+            # 以上都没命中 → 用原有一维逻辑兜底（问环保还是性价比）
             self.bargain_pullback_count += 1
             if self.bargain_pullback_count >= 2:
                 return "lead_wechat", self._render_bargain_template("bargain_lead_wechat")
-            main_mat = self.config.get("main_material", "multi_layer_board")
-            self.bargain_step = 2
-            return "material_price", self._render_bargain_template(
-                "bargain_material_price", material=main_mat
-            )
+            # 不推进状态，返回追问话术（您关注环保还是性价比？）
+            return "pullback", self._render_pullback_template(step=1)
 
         # ========== Step 2：等用户问优惠 ==========
         if self.bargain_step == 2:
@@ -691,7 +677,7 @@ class CustomerServiceEngine:
                     if order_desc:
                         vars_dict["order_desc"] = order_desc
                     if material:
-                        vars_dict["material_name"] = get_material_name(material)
+                        vars_dict["material_name"] = get_material_name(material, self.config)
                         vars_dict["material_price"] = get_material_price(self.config, material)
                         vars_dict["price_method"] = self.config.get("_base_price_method", "投影面积")
                         vars_dict["hardware"] = self.config.get("hardware_brand", "")
@@ -751,29 +737,37 @@ class CustomerServiceEngine:
     def _detect_room_type(self, text):
         """
         检测用户说的是哪个房间/使用场景（场景化材料推荐用）
-        返回：kids_room / kitchen / bathroom / bedroom / shoe_cabinet / tatami / None
+        返回：(scene_key, scene_name)，检测不到返回 (None, None)
         优先级高的在前（比如"儿童衣柜"应该命中儿童房而不是卧室）
         """
         # 按优先级排序（更具体的场景放前面）
         room_patterns = [
             ("kids_room", [
                 "儿童房", "小孩房", "宝宝房", "孩子房间", "儿童衣柜", "孩子用",
-                "儿童", "小孩", "宝宝",
+                "儿童", "小孩", "宝宝", "儿子房", "女儿房",
             ]),
             ("tatami", [
-                "榻榻米", "地台", "踏踏米", "和室",
+                "榻榻米", "地台", "踏踏米", "和室", "书房",
             ]),
             ("kitchen", [
                 "厨房", "橱柜", "厨柜", "厨房柜子", "灶台", "吊柜",
             ]),
             ("bathroom", [
-                "卫生间", "洗手间", "卫浴柜", "浴室柜", "洗手台",
-                "阳台", "阳台柜", "洗衣柜", "洗衣机柜",
+                "卫生间", "洗手间", "卫浴柜", "浴室柜", "洗手台", "卫浴",
+            ]),
+            ("balcony", [
+                "阳台", "阳台柜", "洗衣柜", "洗衣机柜", "晾衣架",
             ]),
             ("shoe_cabinet", [
-                "鞋柜", "餐边柜", "玄关柜", "酒柜", "门厅柜", "入户柜",
+                "鞋柜", "玄关", "入户", "门厅", "玄关柜", "酒柜", "门厅柜", "入户柜",
             ]),
-            ("bedroom", [
+            ("living_room", [
+                "客厅", "电视柜", "餐边柜", "背景墙",
+            ]),
+            ("whole_house", [
+                "全屋", "整套", "整体", "全套", "家里", "整屋",
+            ]),
+            ("bedroom_wardrobe", [
                 "卧室", "主卧", "次卧", "衣柜", "大衣柜", "衣帽间",
                 "大衣橱", "衣橱",
             ]),
@@ -781,37 +775,162 @@ class CustomerServiceEngine:
 
         for room_key, keywords in room_patterns:
             if any(kw in text for kw in keywords):
-                return room_key
-        return None
+                scene_name = self.rec_matrix.get("scene_names", {}).get(room_key, room_key)
+                return room_key, scene_name
+        return None, None
 
     def _detect_preference_type(self, text):
         """
         检测用户在选材料阶段的偏好类型
-        返回：cost_effective（性价比）/ eco_friendly（环保）/ balanced（平衡/让推荐）/ None
+        返回：cost_effective / eco_friendly / balanced / quality / recommend_me / None
+        优先级从高到低：环保 > 品质 > 性价比 > 求推荐 > 随便
         """
-        # 性价比关键词
-        cost_keywords = [
-            "便宜", "性价比", "预算", "实惠", "省钱", "划算",
-            "便宜点", "便宜的", "经济", "实惠点", "预算有限",
-        ]
-        # 环保关键词
+        # 环保关键词（优先级最高，安全第一）
         eco_keywords = [
             "环保", "孩子", "小孩", "孕妇", "无甲醛", "健康",
             "环保的", "环保点", "甲醛", "宝宝", "怀孕",
         ]
-        # 平衡/让推荐关键词
+        # 品质关键词
+        quality_keywords = [
+            "好点的", "用好料", "品质好的", "高端", "最好的", "顶级", "一步到位",
+            "好点", "好的", "高档", "上档次", "最好", "顶配",
+        ]
+        # 性价比关键词
+        cost_keywords = [
+            "便宜", "性价比", "预算", "实惠", "省钱", "划算",
+            "便宜点", "便宜的", "经济", "实惠点", "预算有限",
+            "一般的就行", "普通的", "凑合用", "能用就行", "一般就行",
+        ]
+        # 求推荐关键词（用户主动让推荐，比"随便"更积极）
+        recommend_keywords = [
+            "你推荐", "推荐一下", "哪个好", "给点建议", "有什么推荐",
+            "推荐个", "帮我选", "给推荐",
+        ]
+        # 平衡/随便关键词（用户无所谓，优先级最低）
         balanced_keywords = [
-            "都行", "你推荐", "你看着办", "均衡", "都可以",
-            "卖得最好", "最火的", "热门", "推荐一下", "你觉得",
-            "差不多", "随便", "都要",
+            "都行", "你看着办", "均衡", "都可以",
+            "卖得最好", "最火的", "热门", "你觉得",
+            "差不多", "随便", "都要", "差不多就行", "别太差", "都行你定", "一般吧",
         ]
 
         if any(kw in text for kw in eco_keywords):
             return "eco_friendly"
+        if any(kw in text for kw in quality_keywords):
+            return "quality"
         if any(kw in text for kw in cost_keywords):
             return "cost_effective"
+        if any(kw in text for kw in recommend_keywords):
+            return "recommend_me"
         if any(kw in text for kw in balanced_keywords):
             return "balanced"
+        return None
+
+    def _get_recommendation(self, text):
+        """
+        二维推荐主函数：场景 × 偏好 → 推荐材料 + 理由 + 场景跟进提问
+        
+        逻辑：
+        1. 检测场景 _detect_room_type(text)
+        2. 检测偏好 _detect_preference_type(text)
+        3. 场景和偏好都有 → 查矩阵
+        4. 只有场景，没有偏好 → 用 recommend_me 作为默认偏好
+        5. 只有偏好，没有场景 → 用 bedroom_wardrobe 作为默认场景（最常见）
+        6. 都没有 → 返回 None
+        
+        返回：dict 或 None
+        {
+            "material": "particle_board",      # 推荐材料key
+            "material_name": "颗粒板",          # 材料中文名
+            "material_price": 799,              # 材料单价
+            "reason": "xxx",                    # 推荐理由
+            "scene_key": "bedroom_wardrobe",    # 场景key
+            "scene_name": "卧室衣柜",            # 场景中文名
+            "preference": "cost_effective",     # 偏好key
+            "follow_up": "您衣柜大概做多大？",   # 场景化跟进提问
+        }
+        """
+        scene_key, scene_name = self._detect_room_type(text)
+        preference = self._detect_preference_type(text)
+
+        # 都没有 → 走原有逻辑
+        if not scene_key and not preference:
+            return None
+
+        # 默认场景：卧室衣柜（最常见的咨询场景）
+        if not scene_key:
+            scene_key = "bedroom_wardrobe"
+            scene_name = self.rec_matrix.get("scene_names", {}).get(scene_key, "卧室衣柜")
+
+        # 默认偏好：recommend_me（用户让我们推荐）
+        if not preference:
+            preference = "recommend_me"
+
+        # 查推荐矩阵
+        matrix = self.rec_matrix.get("matrix", {})
+        scene_config = matrix.get(scene_key, {})
+        pref_config = scene_config.get(preference)
+
+        # 矩阵里找不到，降级用推荐款偏好
+        if not pref_config:
+            pref_config = scene_config.get("recommend_me")
+        if not pref_config:
+            return None
+
+        material_key = pref_config.get("material")
+        reason = pref_config.get("reason", "")
+
+        if not material_key:
+            return None
+
+        # 组装场景化跟进提问
+        follow_ups = self.rec_matrix.get("scene_follow_up", {})
+        follow_up = follow_ups.get(scene_key, follow_ups.get("default", "您大概做几个柜子啊？"))
+
+        return {
+            "material": material_key,
+            "material_name": get_material_name(material_key, self.config),
+            "material_price": get_material_price(self.config, material_key),
+            "reason": reason,
+            "scene_key": scene_key,
+            "scene_name": scene_name,
+            "preference": preference,
+            "follow_up": follow_up,
+        }
+
+    # ---------- 议价状态机：嫌贵/竞品 回怼检测 ----------
+    def _detect_bargain_pushback(self, text):
+        """
+        检测用户在议价过程中的负面反馈（嫌贵/竞品对比）
+        命中后返回对应话术，状态不推进
+        砍价信号（要优惠/便宜点）不在这里处理，交给各Step判断是否推进
+        返回：(类型, 话术) 或 None
+        优先级：竞品 > 嫌贵（竞品最具体，先处理）
+        """
+        # 1. 竞品对比（别家/人家/才xx钱/比你们便宜）
+        competitor_keywords = [
+            "别家", "人家", "我刚问的", "我问了一家", "比你们便宜",
+            "别人报的", "另一家", "我朋友家", "我邻居家", "别家才",
+            "别家报", "人家才", "别人才", "便宜多了", "比你家便宜",
+        ]
+        has_competitor = any(kw in text for kw in competitor_keywords)
+        # "才xx钱" / "xx钱就行" 模式检测
+        if not has_competitor:
+            import re
+            if re.search(r"才\s*\d+\s*块", text) or re.search(r"才\s*\d+\s*钱", text) \
+               or re.search(r"\d+\s*块\s*就行", text) or re.search(r"\d+\s*钱\s*就行", text):
+                has_competitor = True
+
+        if has_competitor:
+            return "competitor", self._render_bargain_template("bargain_competitor_compare")
+
+        # 2. 嫌贵（贵/太贵/这么贵/好贵等，不含砍价动作）
+        expensive_keywords = [
+            "太贵", "这么贵", "好贵", "有点贵", "价格高", "不便宜",
+            "真贵", "也太贵", "太贵了", "贵了点", "价钱高",
+        ]
+        if any(kw in text for kw in expensive_keywords):
+            return "expensive", self._render_bargain_template("bargain_value_build")
+
         return None
 
     def _is_end_conversation(self, text):
@@ -892,7 +1011,7 @@ class CustomerServiceEngine:
         ]
         if any(kw in text for kw in address_keywords):
             # 排除纯咨询句式（有疑问词且没有留资信号）
-            question_words = ["吗", "怎么", "什么", "哪", "多少", "呢", "几", "要不要", "能不能"]
+            question_words = ["吗", "怎么", "什么", "哪", "多少", "呢", "几", "要不要", "能不能", "多久", "多远", "多大"]
             has_question = any(qw in text for qw in question_words)
             # 主动留资信号：用户在提供信息，不是在问
             leave_signals = ["我在", "我住", "我家在", "地址是", "给你地址", "过来量",
@@ -906,13 +1025,16 @@ class CustomerServiceEngine:
         return None
 
     def _is_bargain_question(self, text):
-        """判断是不是议价相关问题（命中 bargain 类关键词）"""
+        """判断是不是砍价/要优惠的问题（只有明确砍价信号才算）
+        注意：纯问价（多少钱、价格、报价）不算，归 _is_price_question 管
+        """
         bargain_keywords = [
             "便宜", "优惠", "打折", "最低价", "能不能少", "砍价",
             "再便宜点", "太贵了", "价格高", "有没有优惠", "能便宜吗",
             "便宜点", "少点", "能不能优惠", "还能少吗", "再降点",
             "再打个折", "再少点", "不够便宜", "还是贵", "还是高",
-            "多少钱", "怎么卖", "咋卖", "报价", "价格", "贵不贵",
+            "贵不贵", "贵了", "太贵", "最低多少", "能降吗",
+            "能再便宜", "能少点吗", "便宜点呗",
         ]
         return any(kw in text for kw in bargain_keywords)
 
@@ -920,10 +1042,14 @@ class CustomerServiceEngine:
         """
         判断本轮输入是否跟议价话题相关
         （用于状态机入口判断：在状态中 + 输入相关 才走状态机）
+        包括：问价、砍价、嫌贵、竞品对比、选材料、说面积、说偏好
         """
         if self._is_price_question(text):
             return True
         if self._is_bargain_question(text):
+            return True
+        # 嫌贵/竞品对比 → 也是议价相关（状态机内有专门回怼话术）
+        if self._detect_bargain_pushback(text) is not None:
             return True
         if self._detect_material_choice(text):
             return True
@@ -943,7 +1069,8 @@ class CustomerServiceEngine:
         size_val, _, _ = self._detect_order_size(text)
         if size_val:
             return True
-        if self._detect_room_type(text):
+        scene_key, _ = self._detect_room_type(text)
+        if scene_key:
             return True
         if self._is_end_conversation(text):
             return True
@@ -952,6 +1079,56 @@ class CustomerServiceEngine:
         if any(kw == text.strip() or kw in text for kw in confirm_keywords):
             return True
         return False
+
+    def _is_still_bargaining(self, text):
+        """
+        反向检测：用户还在聊价格吗？
+        只有命中议价相关关键词，才算还在聊价格；没命中就是换话题了，直接退出状态机
+        （比正向检测"用户在聊别的话题"更靠谱，因为价格相关词是有限的、能列全的）
+
+        注意："可以/行/好"这类短确认词如果出现在疑问句里（"可以吗""行吗"），不算议价相关
+        因为用户可能是在问别的事情行不行，不是在确认价格
+        """
+        # 强相关词（价格/砍价/面积/材料/竞品）— 只要命中一个就算
+        strong_keywords = [
+            # 价格/钱相关
+            "价格", "价钱", "多少钱", "怎么卖", "怎么算", "报价", "价位", "怎么收费",
+            # 砍价/嫌贵
+            "便宜", "优惠", "贵", "打折", "砍价", "降价", "少点", "最低价", "最低",
+            "能不能降", "太贵", "有点贵", "这么贵", "好贵", "还是贵", "贵了", "价格高",
+            # 面积/数量（推进状态机）
+            "平", "平方", "平米", "面积", "个平方", "几个柜子", "多少米", "多宽",
+            # 材料名（推进状态机，必须是完整材料名，不能加"板"单字）
+            "颗粒板", "多层板", "生态板", "欧松板", "实木板", "兔宝宝", "露水河",
+            # 竞品对比（状态机内应答-价值塑造/竞品对比）
+            "别家", "人家", "我问了", "比你们", "别人", "另一家", "才600", "才500",
+        ]
+        has_strong = any(kw in text for kw in strong_keywords)
+        if has_strong:
+            return True
+
+        # 弱相关词（确认/犹豫/收尾）— 只有在不是疑问句的情况下才算
+        weak_keywords = [
+            # 确认/否定/犹豫
+            "可以", "行", "好的", "好", "不行", "再想想", "考虑", "考虑下",
+            "嗯", "哦", "行吧", "还行", "不错",
+            # 收尾/留资相关
+            "微信", "加个", "联系方式", "电话", "微信吧", "加微信",
+            "量房", "上门", "设计师", "签单", "下单", "定", "订",
+            # 结束语
+            "我考虑下", "再说吧", "先看看", "以后再说", "算了",
+        ]
+        has_weak = any(kw in text for kw in weak_keywords)
+        if not has_weak:
+            return False  # 强相关没命中，弱相关也没命中 → 肯定换话题了
+
+        # 命中了弱相关词 → 再判断是不是疑问句
+        # 疑问句里的弱相关词（如"可以吗""行吗"）不算议价相关
+        question_markers = ["吗", "呢", "什么", "怎么", "哪", "?", "？"]
+        is_question = any(m in text for m in question_markers)
+        if is_question:
+            return False  # 疑问句 + 只有弱相关 → 换话题了
+        return True  # 非疑问句 + 弱相关 → 还算在聊价格
 
     # ---------- 4) LLM 4 分类意图识别（兜底用） ----------
     def _get_redis(self):
@@ -985,13 +1162,23 @@ class CustomerServiceEngine:
         1=price_inquiry 2=bargain 3=material_compare 4=material_detail
         5=process_question 6=measurement_design 7=leave_contact
         8=product_type 9=chitchat 10=unclear
-        缓存：Redis，key=intent:{md5(text)}，过期7天；Redis不可用时自动降级不缓存
+        缓存：Redis，key=intent:{md5(text+上下文)}，过期7天；Redis不可用时自动降级不缓存
+        上下文：带上最近1轮对话，帮助LLM结合语境判断（如刚问完价格说"太贵了"=bargain）
         """
         import hashlib
         import re
 
-        # Redis 缓存
-        cache_key = "intent:" + hashlib.md5(text.strip().encode("utf-8")).hexdigest()
+        # 取上一轮对话（如果有）
+        prev_user = ""
+        prev_bot = ""
+        if self.history:
+            last = self.history[-1]
+            prev_user = last.get("user", "")
+            prev_bot = last.get("bot", "")
+
+        # 缓存key：有上下文就把上下文也算进去，不同上下文相同输入可能分类不同
+        cache_content = text.strip() + prev_user + prev_bot
+        cache_key = "intent:" + hashlib.md5(cache_content.encode("utf-8")).hexdigest()
         redis_client = self._get_redis()
         if redis_client:
             try:
@@ -1002,7 +1189,7 @@ class CustomerServiceEngine:
                 pass  # Redis挂了也不影响主流程
 
         sys_prompt = (
-            "你是一个全屋定制客服的意图分类器。根据用户的问题，判断属于以下哪一类，只返回数字编号：\n"
+            "你是一个全屋定制客服的意图分类器。结合上下文判断用户当前问题属于哪一类，只返回数字编号：\n"
             "1. price_inquiry - 问价格、多少钱、怎么收费、价位、报价\n"
             "2. bargain - 砍价、要优惠、便宜点、打折、能不能少、太贵了\n"
             "3. material_compare - 材料对比、各有什么优缺点、哪个好、区别在哪、怎么选\n"
@@ -1013,8 +1200,22 @@ class CustomerServiceEngine:
             "8. product_type - 问产品种类、能做什么、有哪些柜子、业务范围\n"
             "9. chitchat - 闲聊、打招呼、谢谢、好的、嗯、哦\n"
             "10. unclear - 听不懂、不确定\n"
+            "注意：请结合上下文判断。比如用户刚问完价格说'太贵了'，就是bargain（砍价/嫌贵），不是其他类别。\n"
             "只返回一个数字（1-10），不要解释，不要其他文字。"
         )
+
+        # 组装用户消息：有上下文就带上一轮
+        if prev_user and prev_bot:
+            user_msg = (
+                f"上一轮对话：\n"
+                f"用户：{prev_user}\n"
+                f"客服：{prev_bot}\n\n"
+                f"当前用户说：{text}\n"
+                f"分类编号："
+            )
+        else:
+            user_msg = f"用户说：{text}\n分类编号："
+
         try:
             resp = requests.post(
                 API_URL,
@@ -1023,7 +1224,7 @@ class CustomerServiceEngine:
                     "model": MODEL,
                     "messages": [
                         {"role": "system", "content": sys_prompt},
-                        {"role": "user", "content": f"用户说：{text}\n分类编号："},
+                        {"role": "user", "content": user_msg},
                     ],
                     "temperature": 0,
                 },
@@ -1045,6 +1246,265 @@ class CustomerServiceEngine:
         except Exception as e:
             print(f"[LLM意图分类降级] {e}")
             return None
+
+    # ========== LLM 19类细分类（新架构主力） ==========
+    def classify_intent_detail(self, text, prev_user=None, prev_bot=None):
+        """
+        LLM 19类细分类（带上下文，新架构主入口）
+        返回：分类标签字符串，失败返回 None
+        
+        19个分类：
+        price_query     - 问价格/多少钱/报价/价位
+        bargain         - 砍价/要优惠/便宜点/打折/要最低价
+        complain_price  - 嫌贵/竞品对比/太贵/别家更便宜/才xx钱
+        material_compare - 材料对比/哪个好/区别/怎么选
+        material_detail - 板材详情/环保/品牌/质量/什么板材
+        hardware_detail - 五金详情/铰链/滑轨/什么牌子五金
+        process_question - 工艺/安装/封边/能不能做/玻璃门/圆弧
+        pricing_method  - 计价方式/投影还是展开/怎么算/加钱项目
+        after_sales     - 售后/质保/坏了/维修/保修几年
+        shop_info       - 店铺地址/位置/在哪/工厂/参观
+        shop_history    - 经营年限/多久了/老店/做了多少年
+        measurement     - 量房/工期/设计/多久做好/上门
+        product_type    - 产品种类/能做什么/有哪些柜子/榻榻米/橱柜
+        lead_capture    - 用户主动留联系方式/留地址/约量房
+        ask_contact     - 问联系方式/微信多少/怎么联系/电话多少
+        greeting        - 打招呼/你好/在吗/有人吗
+        thanks          - 谢谢/感谢/多谢
+        abuse           - 辱骂/脏话/攻击性语言
+        fallback        - 听不懂/不确定/其他
+        """
+        import hashlib
+        import re
+
+        # 缓存key：包含上下文（同样的话，上下文不同分类可能不同）
+        cache_content = text.strip() + (prev_user or "") + (prev_bot or "")
+        cache_key = "intent_detail:" + hashlib.md5(cache_content.encode("utf-8")).hexdigest()
+        redis_client = self._get_redis()
+        if redis_client:
+            try:
+                cached = redis_client.get(cache_key)
+                if cached:
+                    return cached.decode("utf-8") if isinstance(cached, bytes) else cached
+            except Exception:
+                pass
+
+        # 19类分类定义（给LLM看的）
+        category_defs = """
+你是全屋定制客服意图分类器。结合上下文，把用户当前这句话归入以下19类之一，只输出分类标签，不要解释，不要其他文字。
+
+分类定义：
+1. price_query - 用户在问价格，如多少钱、报价、价位、怎么收费、一平方多少钱
+2. bargain - 用户主动砍价要优惠，如便宜点、优惠点、打折、最低价、能不能少
+3. complain_price - 用户嫌贵或拿竞品对比，如太贵、别家更便宜、人家才600、比你们便宜
+4. material_compare - 用户在对比不同材料，如哪个好、有什么区别、怎么选、各有什么优缺点
+5. material_detail - 用户问板材详情，如环保吗、什么板材、板材品牌、质量怎么样
+6. hardware_detail - 用户问五金详情，如什么铰链、五金品牌、滑轨、标配五金有哪些
+7. process_question - 用户问工艺/安装/能不能做，如能做圆弧吗、封边工艺、玻璃门、安装团队
+8. pricing_method - 用户问计价方式，如按投影还是展开、怎么算、抽屉加钱吗、有没有隐形消费
+9. after_sales - 用户问售后/质保，如有售后吗、坏了怎么办、质保几年、五金坏了
+10. shop_info - 用户问店铺地址/位置/工厂/能不能参观，如公司在哪、工厂在哪、可以参观吗
+11. shop_history - 用户问经营历史/年限，如开店多久了、做了多少年、是老品牌吗
+12. measurement - 用户问量房/工期/设计，如量房免费吗、工期多久、什么时候上门、设计费
+13. product_type - 用户问产品种类/业务范围，如能做什么柜子、有榻榻米吗、做橱柜吗
+14. lead_capture - 用户主动留联系方式或约上门，如我微信xxx、我家住xxx、过来量房吧
+15. ask_contact - 用户问怎么联系你们，如你微信多少、留个电话、怎么联系、地址在哪（注意：纯问地址归shop_info）
+16. greeting - 用户打招呼，如你好、在吗、有人吗、嗨
+17. thanks - 用户表示感谢，如谢谢、感谢、多谢、辛苦
+18. abuse - 用户说脏话或攻击性语言，如傻逼、滚、操、垃圾、废物
+19. fallback - 以上都不是，听不懂或无关话题
+
+注意事项：
+- 结合上一轮对话判断。比如刚报完价用户说"太贵了"，就是complain_price，不是其他。
+- "能便宜点吗"是bargain，"这么贵啊"是complain_price。
+- 用户问"你们微信多少"是ask_contact，用户说"我微信是xxx"是lead_capture。
+- "公司在哪"是shop_info，不是ask_contact。
+- "开店多久了"是shop_history，"工期多久"是measurement。
+
+只输出一个分类标签（小写英文），不要编号，不要解释。
+"""
+
+        # 组装用户消息
+        if prev_user and prev_bot:
+            user_msg = f"""上一轮对话：
+用户：{prev_user}
+客服：{prev_bot}
+
+当前用户说：{text}
+
+分类标签："""
+        else:
+            user_msg = f"""用户说：{text}
+
+分类标签："""
+
+        try:
+            resp = requests.post(
+                API_URL,
+                headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": MODEL,
+                    "messages": [
+                        {"role": "system", "content": category_defs},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    "temperature": 0,
+                },
+                timeout=10,  # 10秒超时，火山引擎第一次建连可能慢
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip().lower()
+            # 提取有效分类标签（19个合法值之一）
+            valid_categories = [
+                "price_query", "bargain", "complain_price",
+                "material_compare", "material_detail", "hardware_detail",
+                "process_question", "pricing_method", "after_sales",
+                "shop_info", "shop_history", "measurement", "product_type",
+                "lead_capture", "ask_contact", "greeting", "thanks", "abuse", "fallback"
+            ]
+            # 尝试精确匹配
+            for cat in valid_categories:
+                if cat in content:
+                    result = cat
+                    # 写入缓存
+                    if redis_client:
+                        try:
+                            redis_client.setex(cache_key, 7 * 24 * 3600, result)
+                        except Exception:
+                            pass
+                    return result
+            # 没匹配到有效分类
+            return None
+        except Exception as e:
+            print(f"[LLM细分类降级] {e}")
+            return None
+
+    # ========== 新架构：关键词校验 & 分类映射 ==========
+    # 每个分类2-3个必有关联词，沾边就算过，防止LLM完全瞎分
+    CATEGORY_KEYWORDS = {
+        "price_query": ["价格", "多少钱", "一平", "报价", "价位", "怎么卖", "收费"],
+        "bargain": ["便宜", "优惠", "打折", "砍价", "最低", "能不能少", "降"],
+        "complain_price": ["贵", "别家", "人家", "才", "比你", "太贵", "好贵", "这么贵"],
+        "material_compare": ["区别", "哪个好", "怎么选", "对比", "各有什么"],
+        "material_detail": ["板材", "环保", "品牌", "质量", "什么板", "兔宝宝", "甲醛"],
+        "hardware_detail": ["五金", "铰链", "滑轨", "拉手", "DTC", "dtc", "什么五金"],
+        "process_question": ["能做", "工艺", "封边", "安装", "玻璃门", "圆弧", "做不做"],
+        "pricing_method": ["怎么算", "投影", "展开", "加钱", "计价", "包含什么", "隐形消费"],
+        "after_sales": ["售后", "质保", "坏了", "保修", "维修", "出问题", "维护"],
+        "shop_info": ["地址", "在哪", "店", "工厂", "门店", "参观", "位置"],
+        "shop_history": ["多久", "多少年", "老店", "历史", "经营", "开了几年", "做了多久"],
+        "measurement": ["量房", "工期", "设计", "上门", "多久能", "多少天", "周期"],
+        "product_type": ["柜子", "做什么", "榻榻米", "橱柜", "衣柜", "能做", "有哪些"],
+        "lead_capture": ["我微信", "我电话", "我家住", "我在", "留个电话", "过来量", "约一下"],
+        "ask_contact": ["微信多少", "怎么联系", "联系方式", "电话多少", "你微信", "怎么找你"],
+        "greeting": ["你好", "在吗", "有人", "嗨", "您好", "喂"],
+        "thanks": ["谢谢", "感谢", "多谢", "辛苦", "谢了"],
+        "abuse": ["傻", "滚", "操", "垃圾", "废物", "脑残", "傻逼", "艹"],
+        "fallback": [],
+    }
+
+    # LLM分类 → 模板分类映射（大部分同名，少数特殊映射）
+    CATEGORY_TEMPLATE_MAP = {
+        "price_query": "bargain_price_range",   # 进状态机，这里只是映射参考
+        "bargain": "bargain_probe",             # 进状态机
+        "complain_price": "bargain_value_build", # 进状态机
+        "shop_history": "shop_info",            # 店铺历史合并到shop_info
+        "ask_contact": "ask_contact",
+        "material_compare": "eo_vs_enf",         # 先用E0vsENF模板兜底，后续可扩展
+        "measurement": "total_cycle",            # 工期模板
+        "hardware_detail": "hardware_detail",
+        "pricing_method": "pricing_method",
+        "after_sales": "after_sales",
+        "shop_info": "shop_info",
+        "product_type": "material_recommend_kitchen", # 兜底，实际会动态判断
+        "lead_capture": "lead_capture_success",
+        "greeting": "chat_greeting",
+        "thanks": "chat_thanks",
+        "abuse": "chat_abuse",
+        "material_detail": "material_board_brand",
+        "fallback": None,
+    }
+
+    def _validate_category(self, text, category):
+        """关键词校验：LLM分的类有没有沾边的关键词？有就通过，没有就降级"""
+        if category == "fallback":
+            return True  # fallback总是通过
+        kws = self.CATEGORY_KEYWORDS.get(category, [])
+        if not kws:
+            return True  # 没有定义校验词就算通过
+        return any(kw in text for kw in kws)
+
+    def _render_category_template(self, category, text=None):
+        """根据LLM分类标签，找到对应模板渲染回答。找不到返回None"""
+        # 特殊分类的动态处理
+        if category == "material_detail" and text:
+            # 问环保 → eco_level模板
+            eco_words = ["环保", "甲醛", "E0", "ENF", "e0", "enf", "达标"]
+            if any(w in text for w in eco_words):
+                for hq in self.templates.get("hot_questions", []):
+                    if hq.get("category") == "eco_level":
+                        from jinja2 import Template
+                        tpl = random.choice(hq.get("templates", []))
+                        return Template(tpl).render(**self._vars())
+            # 默认 → 板材品牌
+            for hq in self.templates.get("hot_questions", []):
+                if hq.get("category") == "material_board_brand":
+                    from jinja2 import Template
+                    tpl = random.choice(hq.get("templates", []))
+                    return Template(tpl).render(**self._vars())
+
+        if category == "process_question" and text:
+            # 工艺问题 → 调原有工艺检测方法
+            result = self._match_process_question(text)
+            if result:
+                return result[1]  # 返回回答
+
+        if category == "product_type" and text:
+            # 产品类型 → 看有没有场景匹配（厨房/卧室/榻榻米等）
+            room_type, _ = self._detect_room_type(text)
+            if room_type:
+                for hq in self.templates.get("hot_questions", []):
+                    if hq.get("category") == f"material_recommend_{room_type}":
+                        from jinja2 import Template
+                        tpl_list = hq.get("templates", [])
+                        if tpl_list:
+                            return Template(random.choice(tpl_list)).render(**self._vars())
+
+        if category == "measurement" and text:
+            # 工期相关 → 检测具体类型
+            rush_words = ["加急", "加快", "赶时间", "提前"]
+            if any(w in text for w in rush_words):
+                for hq in self.templates.get("hot_questions", []):
+                    if hq.get("category") == "can_rush":
+                        from jinja2 import Template
+                        tpl = random.choice(hq.get("templates", []))
+                        return Template(tpl).render(**self._vars())
+            # 默认 → 总工期
+            for hq in self.templates.get("hot_questions", []):
+                if hq.get("category") == "total_cycle":
+                    from jinja2 import Template
+                    tpl = random.choice(hq.get("templates", []))
+                    return Template(tpl).render(**self._vars())
+
+        if category == "material_compare" and text:
+            # 材料对比 → 找eo_vs_enf模板（最常见）
+            for hq in self.templates.get("hot_questions", []):
+                if hq.get("category") == "eo_vs_enf":
+                    from jinja2 import Template
+                    tpl = random.choice(hq.get("templates", []))
+                    return Template(tpl).render(**self._vars())
+
+        # 通用：直接找同名模板分类
+        template_cat = self.CATEGORY_TEMPLATE_MAP.get(category, category)
+        if template_cat:
+            for hq in self.templates.get("hot_questions", []):
+                if hq.get("category") == template_cat:
+                    tpl_list = hq.get("templates", [])
+                    if tpl_list:
+                        from jinja2 import Template
+                        return Template(random.choice(tpl_list)).render(**self._vars())
+
+        return None
 
     def detect_intent(self, text):
         """调 LLM 做 4 分类意图识别，失败降级 chat"""
@@ -1095,7 +1555,14 @@ class CustomerServiceEngine:
             "你们有", "能做吗", "做不做", "支持吗",
             "会不会", "能做不", "有吗",
         ]
-        return any(kw in text for kw in obscure_keywords)
+        # 精确关键词匹配
+        if any(kw in text for kw in obscure_keywords):
+            return True
+        # 宽松句式判断：能做/可以做 + 内容 + 吗/？ （如 "能做榻榻米吗"）
+        if ("能做" in text or "可以做" in text or "做不做" in text or "能不能做" in text) and \
+           ("吗" in text or "？" in text or "?" in text):
+            return True
+        return False
 
     # ---------- 6) 对话结束判断（只日志 + 清上下文，红线：不发任何消息） ----------
     END_KEYWORDS = ["谢谢", "感谢", "好的", "再见", "拜拜", "不用了", "不需要", "再说吧"]
@@ -1115,6 +1582,359 @@ class CustomerServiceEngine:
 
     # ---------- 主入口 ----------
     def reply(self, text):
+        """
+        新架构主入口：LLM主力理解 + 关键词校验兜底 + 模板保证准确
+        
+        流程：留资检测 → LLM细分类（带上下文）→ 关键词校验 → 路由（状态机/模板）→ 存历史 → 返回
+        LLM失败/校验不通过 → 自动降级到关键词匹配体系（旧架构）
+        """
+        # 0) 最高优先级：留资检测（保留原逻辑）
+        contact_type = self._detect_contact_info(text)
+        if contact_type is not None:
+            self.bargain_step = 0
+            self.bargain_pullback_count = 0
+            for hot_q in self.templates.get("hot_questions", []):
+                if hot_q.get("category") == "lead_capture_success":
+                    tpl_list = hot_q.get("templates", [])
+                    if tpl_list:
+                        import random
+                        from jinja2 import Template
+                        answer = Template(random.choice(tpl_list)).render(**self._vars())
+                        self.history.append({"user": text, "bot": answer})
+                        self.history = self.history[-3:]
+                        return "lead_capture", answer
+
+        # 1) 取上一轮对话
+        prev_user, prev_bot = None, None
+        if self.history:
+            last = self.history[-1]
+            prev_user = last.get("user", "")
+            prev_bot = last.get("bot", "")
+
+        # 2) LLM 细分类（带1轮上下文）
+        llm_category = self.classify_intent_detail(text, prev_user, prev_bot)
+
+        # 3) 关键词匹配结果（兜底用，同时用于校验）
+        hot_result = self._match_hot_question(text)
+        hot_category = hot_result[0] if hot_result else None
+
+        # 4) 关键词校验：LLM分的类沾边吗？
+        final_category = llm_category
+        if llm_category and not self._validate_category(text, llm_category):
+            # LLM分类不靠谱，降级用关键词匹配
+            final_category = hot_category
+
+        # 5) 如果LLM完全失败，且关键词也没匹配到 → 走旧架构兜底
+        if final_category is None:
+            return self._reply_legacy(text)
+
+        # 6) 路由：价格类 → 进议价状态机v2
+        price_categories = ("price_query", "bargain", "complain_price")
+
+        # ===== 议价状态拦截 =====
+        # 1. Step 1 中用户说偏好/场景关键词 → 进状态机走推荐分支（修复Bug1）
+        # 2. Step >= 2 中用户问详情（环保/材料/五金等）→ 进状态机结合上下文回答，保持状态（修复Bug2）
+        should_enter_bargain = final_category in price_categories
+        if not should_enter_bargain and self.bargain_step == 1:
+            rec_result = self._get_recommendation(text)
+            if rec_result:
+                should_enter_bargain = True
+        if not should_enter_bargain and self.bargain_step >= 2:
+            # Step >= 2 的常见追问 → 进状态机处理（不重置状态）
+            detail_categories = ("material_detail", "hardware_detail", "process_question",
+                                 "pricing_method", "after_sales", "shop_info",
+                                 "shop_history", "measurement", "product_type")
+            if final_category in detail_categories:
+                should_enter_bargain = True
+
+        if should_enter_bargain:
+            tag, answer = self._handle_bargain_v2(text, final_category)
+            # 状态机说接不住（返回None）→ 退出去走全局分类
+            if tag is None:
+                # 退出了状态机，重新用关键词匹配找答案
+                if hot_result:
+                    tag, answer = hot_result
+                else:
+                    # 终极兜底
+                    answer = self._render_category_template("fallback", text) or "不好意思，我没太明白您的意思~"
+                    tag = "fallback"
+        else:
+            # 非价格类 → 找对应模板回答
+            answer = self._render_category_template(final_category, text)
+            if answer:
+                tag = final_category
+                # 非价格类问题 → 退出议价状态（如果之前在议价中）
+                if final_category not in price_categories:
+                    self.bargain_step = 0
+                    self.bargain_pullback_count = 0
+            else:
+                # 找不到模板 → 用关键词兜底
+                if hot_result:
+                    tag, answer = hot_result
+                else:
+                    # 终极兜底
+                    answer = self._render_fallback_guided(text)
+                    tag = "fallback"
+
+        # 7) 存历史
+        self.history.append({"user": text, "bot": answer})
+        self.history = self.history[-3:]
+
+        return tag, answer
+
+    def _render_fallback_guided(self, text):
+        """引导式兜底（新架构默认兜底）"""
+        fallbacks = [
+            "没太明白您的意思~ 您是想了解价格、板材、还是想加个微信发点案例参考？",
+            "不好意思我没get到~ 您是问价格、材料、还是想了解一下我们店？",
+            "这个我得跟设计师确认下，您加我微信{{wechat_id}}，我让设计师给您详细解答。",
+        ]
+        from jinja2 import Template
+        import random
+        return Template(random.choice(fallbacks)).render(**self._vars())
+
+    def _handle_bargain_v2(self, text, llm_category):
+        """
+        议价状态机 v2（LLM驱动版）
+        状态机不再自己判断用户在说啥，直接用LLM分好的类来应答
+        返回：(tag, answer) 或 (None, None)表示接不住，要退出状态机
+        """
+        # ===== Step 1 入口日志 =====
+        # 打印关键信息，方便排查推荐逻辑不生效的问题
+        import datetime
+        scene_key, scene_name = self._detect_room_type(text)
+        preference = self._detect_preference_type(text)
+        print(f"[Bargain Step1 Debug] time={datetime.datetime.now().strftime('%H:%M:%S')}")
+        print(f"  用户输入: {text}")
+        print(f"  LLM意图分类: {llm_category}")
+        print(f"  检测场景: scene_key={scene_key}, scene_name={scene_name}")
+        print(f"  检测偏好: {preference}")
+        print(f"  当前bargain_step: {self.bargain_step}")
+
+        # LLM分类不是价格类 → 视情况决定是否退出状态机
+        price_categories = ("price_query", "bargain", "complain_price")
+        if llm_category not in price_categories:
+            # Step 1 且有推荐结果 → 继续往下走推荐分支
+            if self.bargain_step == 1:
+                rec_result = self._get_recommendation(text)
+                if rec_result:
+                    print(f"  分支走向: Step1推荐逻辑（非价格类但命中推荐）")
+                else:
+                    print(f"  分支走向: 退出状态机（非价格类且无推荐）")
+                    self.bargain_step = 0
+                    self.bargain_pullback_count = 0
+                    return None, None
+            # Step >= 2 → 继续往下，尝试在当前Step内处理追问（不重置状态）
+            elif self.bargain_step >= 2:
+                print(f"  分支走向: Step{self.bargain_step}追问处理（非价格类，保持状态）")
+            else:
+                print(f"  分支走向: 退出状态机（非价格类且不在议价中）")
+                self.bargain_step = 0
+                self.bargain_pullback_count = 0
+                return None, None
+
+        # 检测推进信号
+        material = self._detect_material_choice(text)
+        size_val, input_type, raw_qty = self._detect_order_size(text)
+
+        # ========== Step 0：初次进入 ==========
+        if self.bargain_step == 0:
+            if llm_category in ("bargain", "complain_price"):
+                # 砍价/嫌贵 → 先摸底
+                self.bargain_step = 3
+                self.bargain_pullback_count = 0
+                return "bargain/probe", self._render_bargain_template("bargain_probe")
+            # 问价格 → 报区间
+            self.bargain_step = 1
+            self.bargain_pullback_count = 0
+            return "bargain/price_range", self._render_bargain_template("bargain_price_range")
+
+        # ========== Step 1：已报价格区间 ==========
+        if self.bargain_step == 1:
+            # 用户选了材料 → 报实价
+            if material:
+                self.bargain_step = 2
+                self.selected_material = material
+                self.bargain_pullback_count = 0
+                return "bargain/material_price", self._render_bargain_template(
+                    "bargain_material_price", material=material
+                )
+
+            # ===== 二维推荐矩阵（场景 × 偏好）=====
+            rec_result = self._get_recommendation(text)
+            if rec_result:
+                print(f"  _get_recommendation 返回: {rec_result}")
+                mat_key = rec_result["material"]
+                reason = rec_result["reason"]
+                follow_up = rec_result["follow_up"]
+                scene_key = rec_result["scene_key"]
+                self.selected_material = mat_key
+                self.bargain_step = 2
+                self.bargain_pullback_count = 0
+                print(f"  状态推进: bargain_step → {self.bargain_step}")
+                try:
+                    recommend_text = self._render_bargain_template(
+                        "bargain_recommendation_v2",
+                        material=mat_key,
+                        extra_vars={
+                            "recommend_reason": reason,
+                            "recommended_material_name": rec_result["material_name"],
+                            "recommended_material_price": str(rec_result["material_price"]),
+                            "board_brand": self.config.get("board_brand", ""),
+                            "eco_level": self.config.get("eco_level", ""),
+                            "hardware_brand": self.config.get("hardware_brand", ""),
+                            "edge_banding": self.config.get("edge_band", ""),
+                        }
+                    )
+                    print(f"  模板渲染: bargain_recommendation_v2 成功")
+                except Exception as e:
+                    print(f"  模板渲染: bargain_recommendation_v2 失败: {e}")
+                    # 渲染失败 → fallback到老模板
+                    recommend_text = self._render_bargain_template(
+                        "bargain_material_price", material=mat_key
+                    )
+                    print(f"  fallback到老模板: bargain_material_price")
+                full_answer = recommend_text + "\n" + follow_up
+                print(f"  最终回答: {full_answer[:80]}...")
+                return f"bargain/recommend/{scene_key}", full_answer
+            else:
+                print(f"  _get_recommendation 返回: None（无推荐结果）")
+
+            # 用户嫌贵/拿竞品比 → 价值塑造，不推进
+            if llm_category == "complain_price":
+                return "bargain/pushback/expensive", self._render_bargain_template("bargain_value_build")
+            # 用户砍价 → 摸底问面积
+            if llm_category == "bargain":
+                self.bargain_step = 3
+                self.bargain_pullback_count = 0
+                return "bargain/probe", self._render_bargain_template("bargain_probe")
+            # 用户说了面积 → 按默认材料报价
+            if size_val:
+                self.bargain_step = 2
+                default_mat = self.config.get("default_material", "particle_board")
+                return "bargain/material_price", self._render_bargain_template(
+                    "bargain_material_price", material=default_mat
+                )
+            # 其他 → 推荐主推款，推进到step2
+            self.bargain_pullback_count = 0
+            main_mat = self.config.get("main_material", "multi_layer_board")
+            self.bargain_step = 2
+            return "bargain/material_price", self._render_bargain_template(
+                "bargain_material_price", material=main_mat
+            )
+
+        # ========== Step 2：已报材料实价 ==========
+        if self.bargain_step == 2:
+            # 用户嫌贵/竞品 → 价值塑造
+            if llm_category == "complain_price":
+                return "bargain/pushback/expensive", self._render_bargain_template("bargain_value_build")
+            # 用户砍价 → 摸底，进step3
+            if llm_category == "bargain":
+                self.bargain_step = 3
+                self.bargain_pullback_count = 0
+                return "bargain/probe", self._render_bargain_template("bargain_probe")
+            # 用户又问价格 → 结合上下文，报当前选中材料的实价
+            if llm_category == "price_query":
+                mat = material or self.selected_material or self.config.get("main_material", "multi_layer_board")
+                if material:
+                    self.selected_material = material  # 用户换了材料，更新选中
+                self.bargain_pullback_count = 0
+                return "bargain/material_price", self._render_bargain_template(
+                    "bargain_material_price", material=mat
+                )
+            # 用户换了材料 → 重报价，更新选中材料
+            if material:
+                self.selected_material = material
+                return "bargain/material_price", self._render_bargain_template(
+                    "bargain_material_price", material=material
+                )
+            # 用户说了面积 → 直接给优惠价，跳step4
+            if size_val:
+                self.bargain_step = 4
+                self.bargain_pullback_count = 0
+                order_desc = self._gen_order_desc(size_val, input_type, raw_qty)
+                ans = self._render_bargain_template(
+                    f"bargain_{size_val}",
+                    material=material or self.config.get("default_material", "particle_board"),
+                    order_desc=order_desc
+                )
+                ans = self._append_lead_hook(ans)
+                return f"bargain/{size_val}", ans
+            # ===== 议价中追问：问环保/材料/五金/工艺等 =====
+            # 不推进状态，不计数pullback，正常回答后保持在Step 2
+            detail_categories = ("material_detail", "hardware_detail", "process_question",
+                                 "pricing_method", "after_sales", "shop_info",
+                                 "shop_history", "measurement", "product_type")
+            if llm_category in detail_categories:
+                detail_answer = self._render_category_template(llm_category, text)
+                if detail_answer:
+                    self.bargain_pullback_count = 0
+                    return f"bargain/detail/{llm_category}", detail_answer
+            # 其他 → 拉回正题
+            self.bargain_pullback_count += 1
+            if self.bargain_pullback_count >= 2:
+                return "bargain/lead_wechat", self._render_bargain_template("bargain_lead_wechat")
+            return "bargain/pullback", self._render_pullback_template(step=2)
+
+        # ========== Step 3：摸底问面积 ==========
+        if self.bargain_step == 3:
+            # 用户报了面积 → 给优惠价，进step4
+            if size_val:
+                self.bargain_step = 4
+                self.bargain_pullback_count = 0
+                order_desc = self._gen_order_desc(size_val, input_type, raw_qty)
+                ans = self._render_bargain_template(
+                    f"bargain_{size_val}",
+                    material=material or self.config.get("default_material", "particle_board"),
+                    order_desc=order_desc
+                )
+                ans = self._append_lead_hook(ans)
+                return f"bargain/{size_val}", ans
+            # 用户嫌贵/竞品 → 价值塑造
+            if llm_category == "complain_price":
+                return "bargain/pushback/expensive", self._render_bargain_template("bargain_value_build")
+            # 用户还在砍价但不说面积 → 拉回
+            if llm_category == "bargain":
+                self.bargain_pullback_count += 1
+                if self.bargain_pullback_count >= 2:
+                    return "bargain/lead_wechat", self._render_bargain_template("bargain_lead_wechat")
+                return "bargain/pullback", self._render_pullback_template(step=3)
+            # 不知道/没量过 → 默认中单
+            unknown_keywords = ["不知道", "没量", "没算过", "不清楚", "大概吧", "还没", "不确定"]
+            if any(kw in text for kw in unknown_keywords):
+                self.bargain_step = 4
+                self.bargain_pullback_count = 0
+                ans = self._render_bargain_template(
+                    "bargain_medium",
+                    material=material or self.config.get("default_material", "particle_board"),
+                    order_desc="您这单"
+                )
+                ans = self._append_lead_hook(ans)
+                return "bargain/medium", ans
+            # 其他 → 默认中单推进（不跑丢）
+            self.bargain_step = 4
+            self.bargain_pullback_count = 0
+            ans = self._render_bargain_template(
+                "bargain_medium",
+                material=material or self.config.get("default_material", "particle_board"),
+                order_desc="您这单"
+            )
+            ans = self._append_lead_hook(ans)
+            return "bargain/medium", ans
+
+        # ========== Step 4+：已报优惠价 ==========
+        if llm_category in ("bargain", "complain_price"):
+            # 还在砍/嫌贵 → 升级话术
+            self.bargain_step += 1
+            self.bargain_pullback_count = 0
+            return "bargain/upgrade", self._render_bargain_template("bargain_upgrade")
+        # 其他 → 拉回或引导留资
+        self.bargain_pullback_count += 1
+        if self.bargain_pullback_count >= 2:
+            return "bargain/lead_wechat", self._render_bargain_template("bargain_lead_wechat")
+        return "bargain/pullback", self._render_pullback_template(step=4)
+
+    def _reply_legacy(self, text):
         """
         主入口：
         高频关键词命中 → 工艺问题判断 → 议价状态机 → LLM意图识别 → 模板渲染 → 返回
@@ -1169,6 +1989,14 @@ class CustomerServiceEngine:
         hot_result = self._match_hot_question(text)
         is_bargain = self._is_bargain_question(text)
         is_price_question = self._is_price_question(text)
+
+        # ========== 分支0.5：议价中反向检测——用户还在聊价格吗？不在就退出 ==========
+        # （反向检测比正向检测靠谱：价格相关词是有限的，没命中就是换话题了）
+        if self.bargain_step > 0 and not self._is_still_bargaining(text):
+            # 用户换话题了，退出议价状态机
+            self.bargain_step = 0
+            self.bargain_pullback_count = 0
+            # 继续往下走正常分类流程（不return）
 
         # ========== 分支1：已在议价中 且 本轮输入相关 → 走议价状态机 ==========
         is_bargain_rel = self._is_bargain_related(text)
@@ -1264,9 +2092,19 @@ class CustomerServiceEngine:
                             self.history = self.history[-3:]
                             return tag, answer
 
-            # 9=闲聊 → 闲聊模板
+            # 9=闲聊 → 先匹配细分闲聊关键词，再走通用模板
             if intent_num == 9:
                 self.llm_fallback_streak = 0
+                # 先尝试匹配细分闲聊（打招呼/致谢/告别）
+                chat_result = self._match_hot_question(text)
+                if chat_result is not None:
+                    cat, ans = chat_result
+                    # 只处理闲聊类的细分（chat_前缀的category）
+                    if cat.startswith("chat_"):
+                        self.history.append({"user": text, "bot": ans})
+                        self.history = self.history[-3:]
+                        return cat, ans
+                # 没匹配到细分 → 走通用chitchat模板
                 for hot_q in self.templates.get("hot_questions", []):
                     if hot_q.get("category") == "chitchat":
                         tpl_list = hot_q.get("templates", [])
@@ -1282,10 +2120,31 @@ class CustomerServiceEngine:
         # ========== 分支3：LLM分类失败 或 unclear → 降级走原关键词+LLM兜底逻辑 ==========
         # （保留原有的完整兜底链路，确保不丢客户）
 
-        # 关键词前置命中
+        # 关键词前置命中（但议价和工艺类问题优先级更高，避免被截胡）
         if hot_result is not None:
-            self.llm_fallback_streak = 0
-            tag, answer = hot_result
+            hot_tag, hot_ans = hot_result
+            # 明显的价格/议价问题 → 优先进议价状态机（别被材料推荐等分类截胡）
+            if is_bargain or is_price_question:
+                # 只有当匹配到的不是议价类/计价类时才让位
+                if not hot_tag.startswith(("bargain", "pricing", "projection", "drawer", "hidden_cost", "free_services", "same_board")):
+                    stage, answer = self._handle_bargain(text)
+                    self.llm_fallback_streak = 0
+                    tag = f"bargain/{stage}"
+                else:
+                    self.llm_fallback_streak = 0
+                    tag, answer = hot_result
+            # 明显的"能不能做"类问题 → 先过工艺判断（别被材料推荐截胡）
+            elif self._is_obscure_question(text) and not hot_tag.startswith("process/"):
+                process_result = self._match_process_question(text)
+                if process_result is not None:
+                    self.llm_fallback_streak = 0
+                    tag, answer = process_result
+                else:
+                    self.llm_fallback_streak = 0
+                    tag, answer = hot_result
+            else:
+                self.llm_fallback_streak = 0
+                tag, answer = hot_result
         else:
             # 工艺问题判断
             process_result = self._match_process_question(text)
