@@ -367,6 +367,17 @@ def get_material_name(material_key: str, config: dict = None) -> str:
     return material_key
 
 
+def get_material_brand(material_key: str, config: dict = None) -> str:
+    """材料key转品牌名，从_boards列表里取"""
+    if not config:
+        return ""
+    boards = config.get("_boards", [])
+    for b in boards:
+        if isinstance(b, dict) and b.get("key") == material_key:
+            return b.get("brand", "")
+    return ""
+
+
 def get_price_range(config: dict) -> tuple:
     """
     计算价格区间（最低价, 最高价）

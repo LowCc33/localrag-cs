@@ -29,7 +29,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # 商家配置加载器（支持多商家私有配置）
 from customer_service.shop_config_loader import (
     load_shop_config, get_price_range, get_materials_list_text,
-    get_material_price, get_material_name
+    get_material_price, get_material_name, get_material_brand
 )
 
 
@@ -721,6 +721,10 @@ class CustomerServiceEngine:
                         vars_dict["edge_band"] = self.config.get("edge_band", "")
                         vars_dict["price_range_low"], vars_dict["price_range_high"] = get_price_range(self.config)
                         vars_dict["materials_list"] = get_materials_list_text(self.config)
+                        # 当前材料的品牌（覆盖全局 board_brand，避免价值塑造/详情回答里显示错材料）
+                        mat_brand = get_material_brand(material, self.config)
+                        if mat_brand:
+                            vars_dict["board_brand"] = mat_brand
                     # 价格区间模板也需要这些变量
                     if category_name == "bargain_price_range":
                         vars_dict["price_range_low"], vars_dict["price_range_high"] = get_price_range(self.config)
@@ -2678,7 +2682,9 @@ class CustomerServiceEngine:
         动作：价值塑造（解释为什么这个价）
         状态更新：bargain_step 不变
         """
-        reply = self._render_bargain_template("bargain_value_build")
+        # 用当前选中的材料来做价值塑造，不能用默认材料
+        material = self.selected_material or self.config.get("main_material", "multi_layer_board")
+        reply = self._render_bargain_template("bargain_value_build", material=material)
         return "bargain/value_build", reply, {"bargain_pullback_count": 0}
 
     def _action_give_discount(self, detail_param):
