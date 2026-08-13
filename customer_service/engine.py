@@ -2098,27 +2098,19 @@ class CustomerServiceEngine:
             final_category = hot_category
 
         # 5) 如果LLM完全失败，且关键词也没匹配到 → 走旧架构兜底
-        if final_category is None:
+        #    注意：如果已经在议价中，不走旧架构，继续交给v3降级处理（原地踏步比乱跳安全）
+        if final_category is None and self.bargain_step == 0:
             return self._reply_legacy(text)
 
         # 6) 路由：价格类 → 进议价状态机v2
         price_categories = ("price_query", "bargain", "complain_price")
 
         # ===== 议价状态拦截 =====
-        # 1. Step 1 中用户说偏好/场景关键词 → 进状态机走推荐分支（修复Bug1）
-        # 2. Step >= 2 中用户问详情（环保/材料/五金等）→ 进状态机结合上下文回答，保持状态（修复Bug2）
-        should_enter_bargain = final_category in price_categories
-        if not should_enter_bargain and self.bargain_step == 1:
-            rec_result = self._get_recommendation(text)
-            if rec_result:
-                should_enter_bargain = True
-        if not should_enter_bargain and self.bargain_step >= 2:
-            # Step >= 2 的常见追问 → 进状态机处理（不重置状态）
-            detail_categories = ("material_detail", "hardware_detail", "process_question",
-                                 "pricing_method", "after_sales", "shop_info",
-                                 "shop_history", "measurement", "product_type")
-            if final_category in detail_categories:
-                should_enter_bargain = True
+        # 判断是否进入议价状态机：
+        # 1. 已经在议价中（bargain_step > 0）→ 一律进状态机，交给 v3 全权决策
+        #    （v3 内部可以通过 switch_topic 动作主动退出议价）
+        # 2. 不在议价中，但LLM分类是价格类 → 进入状态机
+        should_enter_bargain = (self.bargain_step > 0) or (final_category in price_categories)
 
         if should_enter_bargain:
             # 议价状态内：完全交给 v3 决策层处理，simple_followup 不再介入
@@ -2455,7 +2447,7 @@ class CustomerServiceEngine:
     BARGAIN_ACTIONS_DESC = """
 可用动作列表（只能选一个）：
 1. restate_price_range - 换个说法重述价格区间。适用：Step1时用户重复问价、没听懂价格
-2. recommend_material - 推荐主推材料并报实价。适用：用户说"你推荐""都行""不知道选什么"
+2. recommend_material - 推荐材料并报实价。适用：用户说"你推荐""都行""不知道选什么"，或用户提到了具体场景/偏好需要推荐；detail_param传推荐理由（一句话，结合用户提到的场景和偏好，口语化）
 3. quote_material_price - 报指定材料的实价。适用：用户明确说"颗粒板多少钱""多层板呢"，detail_param传材料key
 4. probe_area_demand - 摸底询问面积/需求。适用：用户确认了材料/价格，进入摸底阶段
 5. answer_detail - 回答材料/工艺/五金等详情问题。适用：用户问"什么封边""五金什么牌子""环保吗"
@@ -2466,6 +2458,7 @@ class CustomerServiceEngine:
 10. lead_wechat - 引导加微信。适用：用户要走、犹豫不定、聊很久没进展
 11. advance_from_step2 - 从Step2推进到Step3（摸底）。适用：Step2时用户对价格/材料表示认可
 12. confirm_intent - 反问确认用户意图。适用：用户输入太模糊，不知道想干什么
+13. compare_materials - 回答材料对比/质疑类问题。适用：用户问"XX板不好吗""XX和XX哪个好""为什么不推荐XX""XX板怎么样"；detail_param传JSON字符串，包含{affirmed_material:"被肯定的材料key", affirm_reason:"为什么说它也不错", recommend_reason:"为什么推荐当前材料（结合场景）", choice_message:"选择权还给用户的话"}
 """
 
     def _llm_bargain_decision(self, text):
@@ -2549,13 +2542,8 @@ class CustomerServiceEngine:
                 print(f"[LLM议价决策] 返回缺少action字段: {content}")
                 return None
 
-            # 校验动作合法性
-            valid_actions = [
-                "restate_price_range", "recommend_material", "quote_material_price",
-                "probe_area_demand", "answer_detail", "value_build",
-                "give_discount", "pullback_topic", "switch_topic",
-                "lead_wechat", "advance_from_step2", "confirm_intent"
-            ]
+            # 校验动作合法性（从动作handler字典的key里取，避免重复维护）
+            valid_actions = list(self.BARGAIN_ACTION_HANDLERS.keys())
             if result["action"] not in valid_actions:
                 print(f"[LLM议价决策] 返回未知动作: {result['action']}")
                 return None
@@ -2582,10 +2570,18 @@ class CustomerServiceEngine:
     def _action_recommend_material(self, detail_param):
         """
         动作：推荐主推材料并报实价
+        detail_param：推荐理由（LLM根据用户场景+偏好动态生成的一句话）
         状态更新：bargain_step=2, selected_material=主推材料
         """
         main_mat = self.config.get("main_material", "multi_layer_board")
-        reply = self._render_bargain_template("bargain_recommend_material", material=main_mat)
+        # 推荐理由：优先用LLM动态生成的，没有就用默认理由
+        recommend_reason = detail_param.strip() if detail_param and detail_param.strip() else "性价比很高，家用完全够"
+        extra_vars = {"recommend_reason": recommend_reason}
+        reply = self._render_bargain_template(
+            "bargain_recommend_material",
+            material=main_mat,
+            extra_vars=extra_vars
+        )
         state_updates = {"bargain_step": 2, "selected_material": main_mat, "bargain_pullback_count": 0}
         return "bargain/recommend_material", reply, state_updates
 
@@ -2697,6 +2693,68 @@ class CustomerServiceEngine:
         state_updates = {"bargain_step": 3, "bargain_pullback_count": 0}
         return "bargain/advance_from_step2", reply, state_updates
 
+    def _action_compare_materials(self, detail_param):
+        """
+        动作：回答材料对比/质疑类问题
+        铁律：绝对不踩其他材料，先肯定对方，再解释推荐理由，把选择权还给用户
+        detail_param：JSON字符串，包含 {affirmed_material, affirm_reason, recommend_reason, choice_message}
+                    如果不是JSON或字段不全，用默认话术兜底
+        状态更新：bargain_step 不变
+        """
+        import json
+
+        # 默认值（detail_param 解析失败时用）
+        affirmed_mat_key = ""
+        affirm_reason = "也挺好的，性价比很高"
+        recommend_reason = "主要看您的需求和预算"
+        choice_message = "您要是预算有限选那款也完全够用"
+
+        # 尝试解析 detail_param（LLM 应该返回 JSON）
+        if detail_param:
+            try:
+                data = json.loads(detail_param)
+                affirmed_mat_key = data.get("affirmed_material", "")
+                if data.get("affirm_reason"):
+                    affirm_reason = data["affirm_reason"]
+                if data.get("recommend_reason"):
+                    recommend_reason = data["recommend_reason"]
+                if data.get("choice_message"):
+                    choice_message = data["choice_message"]
+            except Exception:
+                # 解析失败就用默认值，不报错
+                pass
+
+        # 被肯定材料的中文名
+        affirmed_mat_name = ""
+        if affirmed_mat_key:
+            affirmed_mat_name = get_material_name(affirmed_mat_key, self.config)
+
+        # 当前推荐材料的中文名
+        rec_mat_key = self.selected_material or self.config.get("main_material", "multi_layer_board")
+        rec_mat_name = get_material_name(rec_mat_key, self.config)
+
+        # 组装话术（结构：肯定对方 → 解释推荐理由 → 选择权还给用户）
+        if affirmed_mat_name:
+            # ponytail: LLM返回的affirm_reason可能已经包含了材料名，避免重复拼接
+            if affirmed_mat_name in affirm_reason:
+                part1 = f"{affirm_reason}，"
+            else:
+                part1 = f"{affirmed_mat_name}{affirm_reason}，"
+        else:
+            part1 = "这两种材料都挺好的，各有各的优势，"
+
+        # 推荐理由也做同样的去重处理
+        if rec_mat_name in recommend_reason:
+            part2 = f"{recommend_reason}，所以我更推荐{rec_mat_name}。"
+        else:
+            part2 = f"主要是{recommend_reason}，所以我更推荐{rec_mat_name}。"
+
+        part3 = choice_message
+
+        full_answer = part1 + part2 + part3
+
+        return "bargain/compare_materials", full_answer, {"bargain_pullback_count": 0}
+
     def _action_confirm_intent(self, detail_param):
         """
         动作：反问确认用户意图
@@ -2724,6 +2782,7 @@ class CustomerServiceEngine:
         "lead_wechat": _action_lead_wechat,
         "advance_from_step2": _action_advance_from_step2,
         "confirm_intent": _action_confirm_intent,
+        "compare_materials": _action_compare_materials,
     }
 
     def _bargain_fallback_current_step(self):
