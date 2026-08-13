@@ -2447,7 +2447,8 @@ class CustomerServiceEngine:
     BARGAIN_ACTIONS_DESC = """
 可用动作列表（只能选一个）：
 1. restate_price_range - 换个说法重述价格区间。适用：Step1时用户重复问价、没听懂价格
-2. recommend_material - 推荐材料并报实价。适用：用户说"你推荐""都行""不知道选什么"，或用户提到了具体场景/偏好需要推荐；detail_param传推荐理由（一句话，结合用户提到的场景和偏好，口语化）
+2. recommend_material - 推荐材料并报实价。适用：用户说"你推荐""都行""不知道选什么"，或用户提到了具体场景/偏好需要推荐；detail_param传JSON字符串：{"material":"推荐的材料key", "reason":"推荐理由（一句话，结合场景+偏好，口语化，只说主推材料的好处，不要提其他材料的名字和价格）"}
+   重要：一次只推一个主推材料，不要在理由里对比或提到其他材料
 3. quote_material_price - 报指定材料的实价。适用：用户明确说"颗粒板多少钱""多层板呢"，detail_param传材料key
 4. probe_area_demand - 摸底询问面积/需求。适用：用户确认了材料/价格，进入摸底阶段
 5. answer_detail - 回答材料/工艺/五金等详情问题。适用：用户问"什么封边""五金什么牌子""环保吗"
@@ -2521,7 +2522,7 @@ class CustomerServiceEngine:
 - JSON 结构：{{"action": "动作名称", "reason": "一句话说明理由", "detail_param": "可选参数"}}
 - detail_param 说明：
   * quote_material_price → 传材料key（particle_board/multi_layer_board/eco_board/solid_wood）
-  * recommend_material → 传推荐理由（一句话，结合场景+偏好，口语化）
+  * recommend_material → 传JSON字符串：{{"material":"材料key", "reason":"推荐理由（一句话，只说主推材料的好处，别提其他材料价格）"}}
   * compare_materials → 传JSON字符串：{{"affirmed_material":"材料key", "affirm_reason":"...", "recommend_reason":"...", "choice_message":"..."}}
   * supplement_scene → 传JSON字符串：{{"scene":"场景名", "reason":"推荐理由"}}
   * answer_detail → 传问题类型关键词（如process_question/material_detail/hardware_detail等）
@@ -2587,20 +2588,44 @@ class CustomerServiceEngine:
 
     def _action_recommend_material(self, detail_param):
         """
-        动作：推荐主推材料并报实价
-        detail_param：推荐理由（LLM根据用户场景+偏好动态生成的一句话）
-        状态更新：bargain_step=2, selected_material=主推材料
+        动作：推荐材料并报实价
+        detail_param：JSON字符串 {"material": "材料key", "reason": "推荐理由"}
+                    或纯字符串（当理由用，材料取主推）
+        设计：LLM根据用户偏好选材料（便宜→颗粒板，环保→多层板等），不再写死main_material
+        状态更新：bargain_step=2, selected_material=推荐材料
         """
-        main_mat = self.config.get("main_material", "multi_layer_board")
-        # 推荐理由：优先用LLM动态生成的，没有就用默认理由
-        recommend_reason = detail_param.strip() if detail_param and detail_param.strip() else "性价比很高，家用完全够"
+        import json
+
+        # 默认值：主推材料 + 默认理由
+        mat_key = self.config.get("main_material", "multi_layer_board")
+        recommend_reason = "性价比很高，家用完全够"
+
+        # 解析 detail_param
+        if detail_param:
+            try:
+                data = json.loads(detail_param)
+                # LLM指定了材料 → 用LLM选的（必须在配置的材料列表里）
+                if data.get("material"):
+                    suggested = data["material"]
+                    # 校验材料是否在配置中（_boards 是 list，每个元素有key字段）
+                    boards = self.config.get("_boards", [])
+                    valid_keys = [b["key"] for b in boards if isinstance(b, dict) and "key" in b]
+                    if suggested in valid_keys:
+                        mat_key = suggested
+                # LLM写了理由
+                if data.get("reason"):
+                    recommend_reason = data["reason"]
+            except Exception:
+                # 不是JSON，整个当理由用
+                recommend_reason = detail_param.strip() or recommend_reason
+
         extra_vars = {"recommend_reason": recommend_reason}
         reply = self._render_bargain_template(
             "bargain_recommend_material",
-            material=main_mat,
+            material=mat_key,
             extra_vars=extra_vars
         )
-        state_updates = {"bargain_step": 2, "selected_material": main_mat, "bargain_pullback_count": 0}
+        state_updates = {"bargain_step": 2, "selected_material": mat_key, "bargain_pullback_count": 0}
         return "bargain/recommend_material", reply, state_updates
 
     def _action_quote_material_price(self, detail_param):
