@@ -2459,6 +2459,7 @@ class CustomerServiceEngine:
 11. advance_from_step2 - 从Step2推进到Step3（摸底）。适用：Step2时用户对价格/材料表示认可
 12. confirm_intent - 反问确认用户意图。适用：用户输入太模糊，不知道想干什么
 13. compare_materials - 回答材料对比/质疑类问题。适用：用户问"XX板不好吗""XX和XX哪个好""为什么不推荐XX""XX板怎么样"；detail_param传JSON字符串，包含{affirmed_material:"被肯定的材料key", affirm_reason:"为什么说它也不错", recommend_reason:"为什么推荐当前材料（结合场景）", choice_message:"选择权还给用户的话"}
+14. supplement_scene - 补充场景推荐。适用：Step2时用户补充新场景/新房间（如"还有卧室呢""厨房也做""衣柜也要"），表示在问新场景用什么材料多少钱；detail_param传推荐理由（一句话，说明为什么当前材料也适合这个新场景，口语化）
 """
 
     def _llm_bargain_decision(self, text):
@@ -2492,6 +2493,15 @@ class CustomerServiceEngine:
         main_mat_name = get_material_name(main_mat, self.config)
 
         # 系统提示词
+        # 组装最近用户输入历史（只取用户说的话，最近2轮，帮助LLM理解上下文）
+        user_history_text = ""
+        if self.history:
+            user_msgs = [h["user"] for h in self.history[-2:]]
+            for i, msg in enumerate(user_msgs):
+                user_history_text += f"{i+1}. {msg}\n"
+        if not user_history_text:
+            user_history_text = "（无）"
+
         system_prompt = f"""
 你是全屋定制客服的议价决策引擎。根据当前议价阶段、对话历史、用户输入，从预定义动作库中选择最合适的一个动作。
 
@@ -2501,14 +2511,22 @@ class CustomerServiceEngine:
 - 商家主推材料：{main_mat_name}（{main_mat}）
 - 拉回正题累计次数：{self.bargain_pullback_count}
 
+【最近用户输入历史（最近2轮，辅助理解上下文）】
+{user_history_text}
 【最近对话历史】
 {history_text}
 {self.BARGAIN_ACTIONS_DESC}
 【输出要求】
 - 严格输出 JSON 格式，不要其他文字，不要 markdown 代码块
 - JSON 结构：{{"action": "动作名称", "reason": "一句话说明理由", "detail_param": "可选参数"}}
-- detail_param：当动作是 quote_material_price 时传材料key（如 particle_board/multi_layer_board/eco_board/solid_wood），其他动作传空字符串
-- 只能从上面12个动作中选一个，不能自创动作
+- detail_param 说明：
+  * quote_material_price → 传材料key（particle_board/multi_layer_board/eco_board/solid_wood）
+  * recommend_material → 传推荐理由（一句话，结合场景+偏好，口语化）
+  * compare_materials → 传JSON字符串：{{"affirmed_material":"材料key", "affirm_reason":"...", "recommend_reason":"...", "choice_message":"..."}}
+  * supplement_scene → 传JSON字符串：{{"scene":"场景名", "reason":"推荐理由"}}
+  * answer_detail → 传问题类型关键词（如process_question/material_detail/hardware_detail等）
+  * 其他动作 → 传空字符串
+- 只能从上面14个动作中选一个，不能自创动作
 - 选择动作时优先考虑：不要乱推进状态，用户没明确表示推进就停留在当前阶段
 """
 
@@ -2755,6 +2773,53 @@ class CustomerServiceEngine:
 
         return "bargain/compare_materials", full_answer, {"bargain_pullback_count": 0}
 
+    def _action_supplement_scene(self, detail_param):
+        """
+        动作：补充场景推荐（用户在Step2补充新房间/新场景）
+        处理逻辑：
+        1. 新场景也推荐同一种材料（保持推荐一致性）
+        2. 说明为什么这种材料也适合新场景（LLM动态生成理由）
+        3. 重申价格+配置
+        4. 继续引导摸底面积
+        detail_param：JSON字符串，包含 {scene:"场景名（如卧室/厨房/衣柜）", reason:"推荐理由"}
+                    或直接传理由字符串（兜底）
+        状态更新：bargain_step 不变（仍为2），bargain_pullback_count 重置
+        """
+        import json
+
+        if not self.selected_material:
+            # 异常兜底：还没选材料就进了这个动作，走推荐流程
+            return self._action_recommend_material(detail_param)
+
+        # 默认值
+        scene_name = "这个空间"
+        recommend_reason = "用一样的材料整体风格统一，也方便施工"
+
+        # 尝试解析 detail_param（优先解析为JSON）
+        if detail_param:
+            try:
+                data = json.loads(detail_param)
+                if data.get("scene"):
+                    scene_name = data["scene"]
+                if data.get("reason"):
+                    recommend_reason = data["reason"]
+            except Exception:
+                # 不是JSON，把整个detail_param当理由用
+                recommend_reason = detail_param.strip() or recommend_reason
+
+        extra_vars = {
+            "recommend_reason": recommend_reason,
+            "scene_name": scene_name,
+        }
+        reply = self._render_bargain_template(
+            "bargain_supplement_scene",
+            material=self.selected_material,
+            extra_vars=extra_vars
+        )
+
+        # 状态不变，仍在Step2
+        return "bargain/supplement_scene", reply, {"bargain_pullback_count": 0}
+
     def _action_confirm_intent(self, detail_param):
         """
         动作：反问确认用户意图
@@ -2783,6 +2848,7 @@ class CustomerServiceEngine:
         "advance_from_step2": _action_advance_from_step2,
         "confirm_intent": _action_confirm_intent,
         "compare_materials": _action_compare_materials,
+        "supplement_scene": _action_supplement_scene,
     }
 
     def _bargain_fallback_current_step(self):

@@ -119,6 +119,16 @@ hot_questions:
       - "我推荐{{recommended_material_name}}，{{recommend_reason}}。{{board_brand}}的板子，{{eco_level}}，{{recommended_material_price}}一平，标配{{hardware_brand}}五金和{{edge_banding}}。您觉得呢？"
       - "{{recommended_material_name}}最合适，{{recommend_reason}}。{{recommended_material_price}}一平方，{{eco_level}}环保，{{hardware_brand}}五金+{{edge_banding}}。您看这个配置行吗？"
 
+  # 0.2.5 补充场景推荐话术（Step2用户补充新房间/新场景时用）
+  - category: bargain_supplement_scene
+    bargain_only: true
+    keywords: []
+    templates:
+      - "{{scene_name}}也推荐{{material_name}}，{{recommend_reason}}。价格也是{{material_price}}一平，一样的{{hardware}}五金和{{edge_band}}封边。您家这些柜子加起来大概有多少投影面积？我给您算个总价。"
+      - "{{scene_name}}也用{{material_name}}就行，{{recommend_reason}}。还是{{material_price}}一平，配置不变，{{hardware}}五金+{{edge_band}}封边。您大概算过投影面积吗？"
+      - "{{scene_name}}也推荐{{material_name}}，{{recommend_reason}}。价格一样，{{material_price}}一平，标配的五金和封边都够用。您家一共要做多少平？我给您报个实价。"
+      - "{{scene_name}}也用{{material_name}}就可以，{{recommend_reason}}。还是{{material_price}}一平，整体材料统一也好看。您这些加起来大概几平？"
+
   # 0.3 拉回正题话术（议价各阶段通用，按step选用）
   - category: bargain_pullback
     bargain_only: true
