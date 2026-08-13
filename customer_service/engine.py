@@ -2132,7 +2132,7 @@ class CustomerServiceEngine:
                     self.history = self.history[-3:]
                     return tag, answer
 
-            tag, answer = self._handle_bargain_v2(text, final_category)
+            tag, answer = self._handle_bargain_v3(text, final_category)
             # 状态机说接不住（返回None）→ 退出去走全局分类
             if tag is None:
                 # 退出了状态机，重新用关键词匹配找答案
@@ -2453,9 +2453,370 @@ class CustomerServiceEngine:
             vars_dict = self._vars()
         return Template(template_str).render(**vars_dict)
 
+    # ========== 议价状态机 v3：LLM决策层 + 动作执行层 ==========
+
+    # 议价动作库定义（给LLM看的说明）
+    BARGAIN_ACTIONS_DESC = """
+可用动作列表（只能选一个）：
+1. restate_price_range - 换个说法重述价格区间。适用：Step1时用户重复问价、没听懂价格
+2. recommend_material - 推荐主推材料并报实价。适用：用户说"你推荐""都行""不知道选什么"
+3. quote_material_price - 报指定材料的实价。适用：用户明确说"颗粒板多少钱""多层板呢"，detail_param传材料key
+4. probe_area_demand - 摸底询问面积/需求。适用：用户确认了材料/价格，进入摸底阶段
+5. answer_detail - 回答材料/工艺/五金等详情问题。适用：用户问"什么封边""五金什么牌子""环保吗"
+6. value_build - 价值塑造（解释为什么这个价）。适用：用户嫌贵、质疑价格、拿竞品对比
+7. give_discount - 给出优惠报价。适用：用户明确议价、且已摸底（Step3+）
+8. pullback_topic - 拉回议价主题。适用：用户扯远了（问工期、问安装、问店铺等无关问题）
+9. switch_topic - 切换出议价话题。适用：用户明确不想聊价格了，问其他重大话题
+10. lead_wechat - 引导加微信。适用：用户要走、犹豫不定、聊很久没进展
+11. advance_from_step2 - 从Step2推进到Step3（摸底）。适用：Step2时用户对价格/材料表示认可
+12. confirm_intent - 反问确认用户意图。适用：用户输入太模糊，不知道想干什么
+"""
+
+    def _llm_bargain_decision(self, text):
+        """
+        LLM 议价决策层：根据当前状态 + 对话历史 + 用户输入，从动作库选一个动作
+        返回：{"action": str, "reason": str, "detail_param": str}，失败返回 None
+        
+        设计原则：
+        - LLM 只做决策（选动作），不生成话术
+        - temperature=0，确保决策稳定
+        - 严格 JSON 格式输出
+        """
+        import json
+
+        # 组装对话历史（最近3轮）
+        history_text = ""
+        if self.history:
+            for i, h in enumerate(self.history[-3:]):
+                history_text += f"第{i+1}轮 - 用户：{h['user']}\n客服：{h['bot']}\n"
+        else:
+            history_text = "（无历史对话）"
+
+        # 当前选中材料说明
+        if self.selected_material:
+            material_info = f"已选材料：{get_material_name(self.selected_material, self.config)}（{self.selected_material}）"
+        else:
+            material_info = "未选材料"
+
+        # 主推材料
+        main_mat = self.config.get("main_material", "multi_layer_board")
+        main_mat_name = get_material_name(main_mat, self.config)
+
+        # 系统提示词
+        system_prompt = f"""
+你是全屋定制客服的议价决策引擎。根据当前议价阶段、对话历史、用户输入，从预定义动作库中选择最合适的一个动作。
+
+【当前状态】
+- 议价阶段（bargain_step）：{self.bargain_step}（0=未开始，1=已报价格区间，2=已报材料实价，3=摸底问面积，4=已报优惠价）
+- {material_info}
+- 商家主推材料：{main_mat_name}（{main_mat}）
+- 拉回正题累计次数：{self.bargain_pullback_count}
+
+【最近对话历史】
+{history_text}
+{self.BARGAIN_ACTIONS_DESC}
+【输出要求】
+- 严格输出 JSON 格式，不要其他文字，不要 markdown 代码块
+- JSON 结构：{{"action": "动作名称", "reason": "一句话说明理由", "detail_param": "可选参数"}}
+- detail_param：当动作是 quote_material_price 时传材料key（如 particle_board/multi_layer_board/eco_board/solid_wood），其他动作传空字符串
+- 只能从上面12个动作中选一个，不能自创动作
+- 选择动作时优先考虑：不要乱推进状态，用户没明确表示推进就停留在当前阶段
+"""
+
+        user_msg = f"用户当前输入：{text}\n\n请选择动作并输出JSON："
+
+        try:
+            resp = requests.post(
+                API_URL,
+                headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    "temperature": 0,
+                },
+                timeout=10,
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+
+            # 清理可能的 markdown 代码块标记
+            content = content.replace("```json", "").replace("```", "").strip()
+
+            # 解析 JSON
+            result = json.loads(content)
+
+            # 校验必填字段
+            if "action" not in result:
+                print(f"[LLM议价决策] 返回缺少action字段: {content}")
+                return None
+
+            # 校验动作合法性
+            valid_actions = [
+                "restate_price_range", "recommend_material", "quote_material_price",
+                "probe_area_demand", "answer_detail", "value_build",
+                "give_discount", "pullback_topic", "switch_topic",
+                "lead_wechat", "advance_from_step2", "confirm_intent"
+            ]
+            if result["action"] not in valid_actions:
+                print(f"[LLM议价决策] 返回未知动作: {result['action']}")
+                return None
+
+            # 确保有 reason 和 detail_param 字段
+            result.setdefault("reason", "")
+            result.setdefault("detail_param", "")
+
+            print(f"[LLM议价决策] action={result['action']}, reason={result['reason']}, param={result.get('detail_param', '')}")
+            return result
+
+        except Exception as e:
+            print(f"[LLM议价决策降级] 调用失败: {e}")
+            return None
+
+    def _action_restate_price_range(self, detail_param):
+        """
+        动作：重述价格区间（Step1用户重复问价时）
+        状态更新：bargain_step 不变
+        """
+        reply = self._render_bargain_template("bargain_price_range")
+        return "bargain/restate_price_range", reply, {}
+
+    def _action_recommend_material(self, detail_param):
+        """
+        动作：推荐主推材料并报实价
+        状态更新：bargain_step=2, selected_material=主推材料
+        """
+        main_mat = self.config.get("main_material", "multi_layer_board")
+        reply = self._render_bargain_template("bargain_recommend_material", material=main_mat)
+        state_updates = {"bargain_step": 2, "selected_material": main_mat, "bargain_pullback_count": 0}
+        return "bargain/recommend_material", reply, state_updates
+
+    def _action_quote_material_price(self, detail_param):
+        """
+        动作：报指定材料的实价
+        detail_param：材料key（如 particle_board）
+        状态更新：bargain_step=2, selected_material=指定材料
+        """
+        material = detail_param or self.config.get("main_material", "multi_layer_board")
+        # 校验材料合法性，不合法就用主推
+        valid_materials = list(self.config.get("_board_keywords_map", {}).keys())
+        if material not in valid_materials and valid_materials:
+            material = self.config.get("main_material", "multi_layer_board")
+        reply = self._render_bargain_template("bargain_material_price", material=material)
+        state_updates = {"bargain_step": 2, "selected_material": material, "bargain_pullback_count": 0}
+        return "bargain/quote_material_price", reply, state_updates
+
+    def _action_probe_area_demand(self, detail_param):
+        """
+        动作：摸底询问面积/需求
+        状态更新：bargain_step=3
+        """
+        reply = self._render_bargain_template("bargain_probe")
+        state_updates = {"bargain_step": 3, "bargain_pullback_count": 0}
+        return "bargain/probe_area_demand", reply, state_updates
+
+    def _action_answer_detail(self, detail_param):
+        """
+        动作：回答材料/工艺/五金等详情问题
+        状态更新：bargain_step 不变
+        """
+        # 复用现有的分类模板渲染逻辑，先尝试用 detail_param 作为分类
+        # 如果没有，就用通用详情模板兜底
+        detail_answer = None
+        if detail_param:
+            detail_answer = self._render_category_template(detail_param)
+        if not detail_answer:
+            # 兜底：用材料详情模板
+            detail_answer = self._render_category_template("material_detail")
+        if not detail_answer:
+            detail_answer = "这个您放心，我们家用的都是达标材料，质量有保障。"
+        return "bargain/answer_detail", detail_answer, {"bargain_pullback_count": 0}
+
+    def _action_value_build(self, detail_param):
+        """
+        动作：价值塑造（解释为什么这个价）
+        状态更新：bargain_step 不变
+        """
+        reply = self._render_bargain_template("bargain_value_build")
+        return "bargain/value_build", reply, {"bargain_pullback_count": 0}
+
+    def _action_give_discount(self, detail_param):
+        """
+        动作：给出优惠报价
+        状态更新：bargain_step=4
+        """
+        # 用中单优惠模板兜底（实际订单大小由摸底结果决定，这里先给中单）
+        material = self.selected_material or self.config.get("default_material", "particle_board")
+        reply = self._render_bargain_template(
+            "bargain_medium",
+            material=material,
+            order_desc="您这单"
+        )
+        reply = self._append_lead_hook(reply)
+        state_updates = {"bargain_step": 4, "bargain_pullback_count": 0}
+        return "bargain/give_discount", reply, state_updates
+
+    def _action_pullback_topic(self, detail_param):
+        """
+        动作：拉回议价主题
+        状态更新：bargain_pullback_count + 1，达到阈值就引导加微信
+        """
+        new_count = self.bargain_pullback_count + 1
+        if new_count >= 2:
+            # 连续2轮扯远 → 引导加微信
+            reply = self._render_bargain_template("bargain_lead_wechat")
+            return "bargain/lead_wechat", reply, {"bargain_pullback_count": new_count}
+        # 否则拉回正题
+        step = max(1, min(self.bargain_step, 4))
+        reply = self._render_pullback_template(step=step)
+        return "bargain/pullback_topic", reply, {"bargain_pullback_count": new_count}
+
+    def _action_switch_topic(self, detail_param):
+        """
+        动作：切换出议价话题（用户明确不想聊价格了）
+        状态更新：bargain_step=0，返回 (None, None) 让外层路由处理
+        """
+        return None, None, {"bargain_step": 0, "bargain_pullback_count": 0}
+
+    def _action_lead_wechat(self, detail_param):
+        """
+        动作：引导加微信
+        状态更新：bargain_step 不变
+        """
+        reply = self._render_bargain_template("bargain_lead_wechat")
+        return "bargain/lead_wechat", reply, {}
+
+    def _action_advance_from_step2(self, detail_param):
+        """
+        动作：从Step2推进到Step3（摸底）
+        状态更新：bargain_step=3
+        """
+        reply = self._render_bargain_template("bargain_probe")
+        state_updates = {"bargain_step": 3, "bargain_pullback_count": 0}
+        return "bargain/advance_from_step2", reply, state_updates
+
+    def _action_confirm_intent(self, detail_param):
+        """
+        动作：反问确认用户意图
+        状态更新：bargain_step 不变
+        """
+        confirm_templates = [
+            "您具体是想了解哪方面呢？价格、材料还是工艺？",
+            "不好意思没太明白，您是想问价格吗？还是想看材料？",
+            "您可以说具体点，我好给您准确推荐。",
+        ]
+        reply = random.choice(confirm_templates)
+        return "bargain/confirm_intent", reply, {}
+
+    # 动作 → handler 映射表
+    BARGAIN_ACTION_HANDLERS = {
+        "restate_price_range": _action_restate_price_range,
+        "recommend_material": _action_recommend_material,
+        "quote_material_price": _action_quote_material_price,
+        "probe_area_demand": _action_probe_area_demand,
+        "answer_detail": _action_answer_detail,
+        "value_build": _action_value_build,
+        "give_discount": _action_give_discount,
+        "pullback_topic": _action_pullback_topic,
+        "switch_topic": _action_switch_topic,
+        "lead_wechat": _action_lead_wechat,
+        "advance_from_step2": _action_advance_from_step2,
+        "confirm_intent": _action_confirm_intent,
+    }
+
+    def _bargain_fallback_current_step(self):
+        """
+        降级策略：LLM 决策失败时，返回当前阶段的默认话术，不推进状态
+        兜底原则：宁可原地踏步重复话术，也不能乱推进状态
+        返回：(tag, reply_text, state_updates)
+        """
+        step = self.bargain_step
+        if step == 0:
+            # 未开始 → 报价格区间，进Step1
+            reply = self._render_bargain_template("bargain_price_range")
+            return "bargain/fallback_price_range", reply, {"bargain_step": 1, "bargain_pullback_count": 0}
+        elif step == 1:
+            # Step1 → 重述价格区间，不推进
+            reply = self._render_bargain_template("bargain_price_range")
+            return "bargain/fallback_step1", reply, {}
+        elif step == 2:
+            # Step2 → 重述当前选中材料的价格，不推进
+            material = self.selected_material or self.config.get("main_material", "multi_layer_board")
+            reply = self._render_bargain_template("bargain_material_price", material=material)
+            return "bargain/fallback_step2", reply, {}
+        elif step == 3:
+            # Step3 → 重述摸底话术，不推进
+            reply = self._render_bargain_template("bargain_probe")
+            return "bargain/fallback_step3", reply, {}
+        else:
+            # Step4+ → 重述优惠价，不推进
+            material = self.selected_material or self.config.get("default_material", "particle_board")
+            reply = self._render_bargain_template(
+                "bargain_medium", material=material, order_desc="您这单"
+            )
+            reply = self._append_lead_hook(reply)
+            return "bargain/fallback_step4", reply, {}
+
+    def _handle_bargain_v3(self, text, llm_category):
+        """
+        议价状态机 v3（LLM决策层 + 动作执行层）
+        核心流程：LLM决策 → 动作分发 → 更新状态 → 返回
+        LLM 失败时降级到当前阶段默认应答（不推进状态）
+        
+        Args:
+            text: 用户输入
+            llm_category: LLM细分类结果（兼容旧接口，v3主要用自己的决策）
+        
+        Returns:
+            (tag, answer) 或 (None, None) 表示退出状态机
+        """
+        import datetime
+        print(f"[Bargain V3 Debug] time={datetime.datetime.now().strftime('%H:%M:%S')}")
+        print(f"  用户输入: {text}")
+        print(f"  LLM意图分类: {llm_category}")
+        print(f"  当前bargain_step: {self.bargain_step}")
+        print(f"  selected_material: {self.selected_material}")
+
+        # Step 0 初次进入：直接报价格区间（不需要LLM决策，确定性最高）
+        if self.bargain_step == 0:
+            if llm_category in ("bargain", "complain_price"):
+                # 砍价/嫌贵 → 先摸底
+                self.bargain_step = 3
+                self.bargain_pullback_count = 0
+                reply = self._render_bargain_template("bargain_probe")
+                return "bargain/probe", reply
+            # 问价格 → 报区间
+            self.bargain_step = 1
+            self.bargain_pullback_count = 0
+            reply = self._render_bargain_template("bargain_price_range")
+            return "bargain/price_range", reply
+
+        # Step 1+：调用 LLM 决策
+        decision = self._llm_bargain_decision(text)
+
+        if decision and decision.get("action") in self.BARGAIN_ACTION_HANDLERS:
+            # LLM 决策成功 → 执行对应动作
+            handler = self.BARGAIN_ACTION_HANDLERS[decision["action"]]
+            tag, reply, state_updates = handler(self, decision.get("detail_param", ""))
+            # 更新状态变量
+            for key, value in state_updates.items():
+                setattr(self, key, value)
+            print(f"  决策结果: action={decision['action']}, reason={decision.get('reason', '')}")
+            print(f"  状态更新: {state_updates}")
+            return tag, reply
+        else:
+            # 降级：返回当前阶段默认话术，不推进状态
+            print("  LLM决策失败，降级到当前阶段默认应答")
+            tag, reply, state_updates = self._bargain_fallback_current_step()
+            for key, value in state_updates.items():
+                setattr(self, key, value)
+            return tag, reply
+
     def _handle_bargain_v2(self, text, llm_category):
         """
-        议价状态机 v2（LLM驱动版）
+        议价状态机 v2（旧版硬编码实现，已被v3替代，保留作为降级备选）
         状态机不再自己判断用户在说啥，直接用LLM分好的类来应答
         返回：(tag, answer) 或 (None, None)表示接不住，要退出状态机
         """

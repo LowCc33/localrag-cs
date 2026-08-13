@@ -85,9 +85,9 @@ hot_questions:
     bargain_only: true
     keywords: []
     templates:
-      - "咱这价格从{{price_range_low}}到{{price_range_high}}一平都有，主要看材料。{{materials_list}}，您主要关注环保还是性价比？我给您推荐合适的。"
-      - "价格多少主要看您选啥材料，颗粒板最便宜，实木最贵。您家用在哪个房间？不同地方选的材料不一样。"
-      - "一平方{{price_range_low}}到{{price_range_high}}不等，有颗粒板、多层板、生态板、实木板好几种。您有什么偏好吗？我给您推荐最适合的。"
+      - "咱这价格从{{price_range_low}}到{{price_range_high}}一平都有，主要看材料。{{materials_list}}，您主要做哪些柜子？更看重环保还是性价比？我给您推荐最合适的。"
+      - "价格多少主要看您选啥材料，{{materials_list}}都有。您家做哪些地方的柜子？更看重环保还是性价比？我给您针对性推荐。"
+      - "一平方{{price_range_low}}到{{price_range_high}}不等，{{materials_list}}好几种。您主要做哪些柜子？有什么偏好吗？我给您推荐最适合的。"
 
   # 0.2 选定材料后的实价（议价状态机专用 Step 1→2）
   - category: bargain_material_price

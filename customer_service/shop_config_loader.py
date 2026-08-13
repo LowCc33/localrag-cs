@@ -48,12 +48,33 @@ def load_shop_config(shop_id: str = None) -> dict:
 
 
 def _load_default_config() -> dict:
-    """加载默认的 YAML 配置"""
+    """加载默认的 YAML 配置，并做旧格式→动态板材格式转换"""
     if "default" in _config_cache:
         return _config_cache["default"]
 
     with open(DEFAULT_CONFIG_PATH, encoding="utf-8") as f:
         config = yaml.safe_load(f)
+
+    # ponytail: 默认 YAML 配置是旧格式，需要转换成动态板材格式
+    # 否则 _boards / _board_name_map / _board_price_map 都是空的
+    pricing = config.get("_pricing", {})
+    materials = {
+        "board_names": config.get("board_names", {}),
+        "default_board_brand": config.get("board_brand", ""),
+        "default_edge_band": config.get("edge_band", ""),
+        "default_hardware_brand": config.get("hardware_brand", ""),
+        "default_eco_level": config.get("eco_level", ""),
+    }
+    boards_list = _convert_old_pricing_to_boards(pricing, materials)
+    board_maps = _build_board_maps(boards_list)
+
+    # 把动态字段注入 config
+    config["_boards"] = boards_list
+    config["_board_name_map"] = board_maps["name_map"]
+    config["_board_price_map"] = board_maps["price_map"]
+    config["_board_keywords_map"] = board_maps["keywords_map"]
+    config["_board_brand_map"] = board_maps["brand_map"]
+    config["_board_eco_map"] = board_maps["eco_map"]
 
     _config_cache["default"] = config
     return config
@@ -215,12 +236,21 @@ def _convert_old_pricing_to_boards(pricing: dict, materials: dict) -> list:
         "solid_wood": ["实木", "原木板"],
     }
 
+    # 内置中文名兜底映射（board_names 没配置时用，避免显示英文key）
+    BUILTIN_NAME_MAP = {
+        "particle_board": "颗粒板",
+        "multi_layer_board": "多层板",
+        "osb_board": "欧松板",
+        "ecological_board": "生态板",
+        "solid_wood": "实木板",
+    }
+
     boards = []
     first = True
     for key, price_field in old_price_map.items():
         price = pricing.get(price_field, 0)
         if price and price > 0:
-            name = old_name_map.get(key, key)
+            name = old_name_map.get(key) or BUILTIN_NAME_MAP.get(key, key)
             boards.append({
                 "key": key,
                 "name": name,
