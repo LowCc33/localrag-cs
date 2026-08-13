@@ -2121,17 +2121,8 @@ class CustomerServiceEngine:
                 should_enter_bargain = True
 
         if should_enter_bargain:
-            # ===== 新增：简单追问直答层（优先级高于状态机）=====
-            # 先答问题，再推进状态机。处理不了再交给状态机
-            if self.bargain_step > 0:
-                followup_result = self._handle_simple_followup(text, final_category)
-                if followup_result is not None:
-                    tag, answer = followup_result
-                    self.llm_fallback_streak = 0
-                    self.history.append({"user": text, "bot": answer})
-                    self.history = self.history[-3:]
-                    return tag, answer
-
+            # 议价状态内：完全交给 v3 决策层处理，simple_followup 不再介入
+            # （v3 的 answer_detail / pullback_topic / value_build 等动作能覆盖详情问答场景）
             tag, answer = self._handle_bargain_v3(text, final_category)
             # 状态机说接不住（返回None）→ 退出去走全局分类
             if tag is None:
@@ -2338,6 +2329,8 @@ class CustomerServiceEngine:
         全局简单问题直答层（放在reply主入口最前面，留资检测之后、LLM分类之前）
         能直接答的先答，不绕状态机、不走LLM
         
+        注意：议价状态内（bargain_step > 0）直接返回None，全交给 v3 决策层处理
+        
         处理顺序（优先级从高到低）：
         1. 确认类追问（"是XX吗"、"你说的XX吧"）
         2. 工艺类追问（"你们做铝框门不"、"能做洞洞板吗"）
@@ -2345,6 +2338,9 @@ class CustomerServiceEngine:
         
         返回：(tag, answer) 或 None（不是简单问题，继续走原流程）
         """
+        # ponytail: 议价状态内一律交给 v3 决策层，simple_question 不介入
+        if self.bargain_step > 0:
+            return None
         # ===== 第1优先级：确认类追问 =====
         if self._is_confirmation_question(text):
             item = self._extract_confirm_item(text)
@@ -2619,11 +2615,10 @@ class CustomerServiceEngine:
 
     def _action_answer_detail(self, detail_param):
         """
-        动作：回答材料/工艺/五金等详情问题
+        动作：回答材料/工艺/五金等详情问题，回答后追加拉回议价的话术
         状态更新：bargain_step 不变
         """
-        # 复用现有的分类模板渲染逻辑，先尝试用 detail_param 作为分类
-        # 如果没有，就用通用详情模板兜底
+        # 复用现有的分类模板渲染逻辑
         detail_answer = None
         if detail_param:
             detail_answer = self._render_category_template(detail_param)
@@ -2632,7 +2627,12 @@ class CustomerServiceEngine:
             detail_answer = self._render_category_template("material_detail")
         if not detail_answer:
             detail_answer = "这个您放心，我们家用的都是达标材料，质量有保障。"
-        return "bargain/answer_detail", detail_answer, {"bargain_pullback_count": 0}
+        
+        # 答完后追加拉回议价的话术（根据当前step）
+        follow_up = self._get_bargain_follow_up()
+        full_answer = detail_answer + "\n" + follow_up
+        
+        return "bargain/answer_detail", full_answer, {"bargain_pullback_count": 0}
 
     def _action_value_build(self, detail_param):
         """
