@@ -249,19 +249,14 @@ class CustomerServiceEngine:
           - size: 'large'/'medium'/'small'/None
           - input_type: 'area'（面积）/'count'（柜子数量）/'whole_house'（全屋）/None
           - raw_quantity: 提取到的原始数量，如 '10'、'3'，用于模板动态插入
+        优先级：面积数字（精确值） > 柜子数量（降级估算） > 全屋类（按large估算） > 不知道
         面积分档：≤5平=小单，6-29平=中单，≥30平=大单
+        柜子估算：每柜按3.5㎡换算（衣柜2.4m高×1.5m宽左右）
+        全屋估算：按25㎡估算（中单偏大，走medium档）
         """
         import re
 
-        # 1. 全屋类（大单）
-        large_keywords = [
-            "全屋", "整体", "全部", "整套", "所有房间", "全屋定制",
-            "整套房子", "全房", "所有柜子", "全部做", "全套"
-        ]
-        if any(kw in text for kw in large_keywords):
-            return ("large", "whole_house", None)
-
-        # 2. 面积检测（正则：数字 + 个(可选) + 平方/平米/平/㎡）
+        # 1. 面积检测（最高优先级，精确值）：数字 + 个(可选) + 平方/平米/平/㎡
         area_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:个)?\s*(?:平方|平米|平|㎡)', text)
         if area_match:
             raw = area_match.group(1)
@@ -273,39 +268,77 @@ class CustomerServiceEngine:
             else:
                 return ("small", "area", raw)
 
-        # 3. 柜子数量检测
-        # 小单关键词（1-2个）
+        # 2. 柜子数量检测（降级估算面积，每柜按3.5㎡换算）
+        # ponytail: 柜子数量降级为面积估算，标记input_type=count，话术里带"大概"
+        # 正则匹配：数字（汉字或阿拉伯） + 个 + 柜子/衣柜/鞋柜/书柜/酒柜/橱柜 等
+        import re as _re
+        # 阿拉伯数字 + 个 + 家具名
+        count_match = _re.search(r'(\d+)\s*(?:个|套|组)\s*(?:柜子|衣柜|鞋柜|书柜|酒柜|橱柜|吊柜|地柜|榻榻米|定制)?', text)
+        if count_match:
+            count_num = int(count_match.group(1))
+            est_area = count_num * 3.5  # 每柜按3.5㎡估算
+            if est_area >= 30:
+                return ("large", "count", count_match.group(1))
+            elif est_area >= 6:
+                return ("medium", "count", count_match.group(1))
+            else:
+                return ("small", "count", count_match.group(1))
+
+        # 汉字数字匹配：一两/两三/三四/四五 + 个/柜子/衣柜 等
+        cn_count_patterns = [
+            ("一两个", 1.5), ("一两", 1.5), ("一二个", 1.5),
+            ("两三个", 2.5), ("两三", 2.5),
+            ("三四个", 3.5), ("三四", 3.5),
+            ("四五个", 4.5), ("四五", 4.5),
+            ("五六个", 5.5), ("五六", 5.5),
+            ("六七个", 6.5), ("六七", 6.5),
+            ("七八个", 7.5), ("七八", 7.5),
+            ("十几个", 10), ("十多个", 10),
+        ]
+        for pattern, cnt_val in cn_count_patterns:
+            if pattern in text and any(suffix in text for suffix in ["柜子", "衣柜", "鞋柜", "书柜", "酒柜", "橱柜", "个", ""]):
+                est_area = cnt_val * 3.5
+                raw_desc = pattern.replace("个", "").replace("柜子", "")
+                if est_area >= 30:
+                    return ("large", "count", raw_desc)
+                elif est_area >= 6:
+                    return ("medium", "count", raw_desc)
+                else:
+                    return ("small", "count", raw_desc)
+
+        # 单个汉字数词 + 个 + 家具名（一个衣柜/两个鞋柜/三个书柜...）
+        cn_nums = {
+            "一": 1, "两": 2, "二": 2, "三": 3, "四": 4,
+            "五": 5, "六": 6, "七": 7, "八": 8, "九": 9, "十": 10
+        }
+        _cn_match = _re.search(r'([一两二三四五六七八九十])\s*个\s*(?:柜子|衣柜|鞋柜|书柜|酒柜|橱柜|吊柜|地柜|榻榻米|定制)', text)
+        if _cn_match:
+            num_char = _cn_match.group(1)
+            count_num = cn_nums.get(num_char, 1)
+            est_area = count_num * 3.5
+            raw_desc = str(count_num)
+            if est_area >= 30:
+                return ("large", "count", raw_desc)
+            elif est_area >= 6:
+                return ("medium", "count", raw_desc)
+            else:
+                return ("small", "count", raw_desc)
+
+        # 关键词匹配柜子数量（无明确数字时）
         small_keywords = [
             "一个柜子", "两个柜子", "就一个", "就做一个", "就衣柜",
             "就鞋柜", "一二个", "一两个", "只做一个", "1个", "2个",
             "就一个柜子", "单个", "一个房间"
         ]
-        # 中单关键词（3-5个）
         medium_keywords = [
             "三个柜子", "四个柜子", "五个柜子", "三四个", "四五个",
             "几个柜子", "两三", "三四", "四五", "3个", "4个", "5个",
             "几个", "两三个", "三四个柜子"
         ]
-        # 尝试提取具体数字
-        count_match = re.search(r'(\d+)\s*(?:个|套)', text)
-        count_num = None
-        if count_match:
-            count_num = int(count_match.group(1))
-            if count_num >= 6:
-                return ("large", "count", count_match.group(1))
-            elif count_num >= 3:
-                return ("medium", "count", count_match.group(1))
-            else:
-                return ("small", "count", count_match.group(1))
+        large_keywords_count = ["六个柜子", "七个柜子", "八个柜子", "很多柜子", "十几个"]
 
-        # 没有数字但有关键词
-        if any(kw in text for kw in small_keywords):
-            # 找个大概数量描述
-            if "一个" in text or "1个" in text or "就一个" in text:
-                return ("small", "count", "1")
-            elif "两个" in text or "2个" in text:
-                return ("small", "count", "2")
-            return ("small", "count", "一两")
+        if any(kw in text for kw in large_keywords_count):
+            return ("large", "count", "六七")
         if any(kw in text for kw in medium_keywords):
             if "三四个" in text or "三四" in text:
                 return ("medium", "count", "三四")
@@ -318,24 +351,37 @@ class CustomerServiceEngine:
             elif "5个" in text:
                 return ("medium", "count", "5")
             return ("medium", "count", "三四")
+        if any(kw in text for kw in small_keywords):
+            if "一个" in text or "1个" in text or "就一个" in text:
+                return ("small", "count", "1")
+            elif "两个" in text or "2个" in text:
+                return ("small", "count", "2")
+            return ("small", "count", "一两")
 
-        return (None, None, None)
+        # 3. 全屋类（最低优先级，按large估算）
+        whole_house_keywords = [
+            "全屋", "整体", "全部", "整套", "所有房间", "全屋定制",
+            "整套房子", "全房", "所有柜子", "全部做", "全套"
+        ]
+        if any(kw in text for kw in whole_house_keywords):
+            return ("large", "whole_house", None)
+
         return (None, None, None)
 
     def _gen_order_desc(self, size_val, input_type, raw_quantity):
         """
         根据订单信息生成描述字符串，用于模板动态插入
-        - 面积输入 → "10个平方"
-        - 柜子数量输入 → "3个柜子"
-        - 全屋类输入 → "全屋"
+        - 面积输入 → "10个平方"（精确值，不带大概）
+        - 柜子数量输入 → "大概3个柜子"（估算值，带大概）
+        - 全屋类输入 → "大概全屋"（估算值，带大概）
         - 判断不出 → "您这单"
         """
         if input_type == "area" and raw_quantity:
             return f"{raw_quantity}个平方"
         elif input_type == "count" and raw_quantity:
-            return f"{raw_quantity}个柜子"
+            return f"大概{raw_quantity}个柜子"
         elif input_type == "whole_house":
-            return "全屋"
+            return "大概全屋"
         else:
             return "您这单"
 
@@ -614,18 +660,11 @@ class CustomerServiceEngine:
                 ans = self._append_lead_hook(ans)
                 return size_val, ans
 
-            # 说不知道/没量过 → 默认走中单（不跑丢），进step4
-            unknown_keywords = ["不知道", "没量", "没算过", "不清楚", "大概吧", "还没", "不确定"]
+            # 说不知道/没量过 → 直接引导加微信 + 活动钩子，不继续追问
+            unknown_keywords = ["不知道", "没量", "没算过", "不清楚", "大概吧", "还没", "不确定", "不知道多少", "没量过", "还没量"]
             if any(kw in text for kw in unknown_keywords):
-                self.bargain_step = 4
                 self.bargain_pullback_count = 0
-                ans = self._render_bargain_template(
-                    "bargain_medium",
-                    material=material or self.config.get("default_material", "particle_board"),
-                    order_desc="您这单"
-                )
-                ans = self._append_lead_hook(ans)
-                return "medium", ans
+                return "lead_wechat", self._render_bargain_template("bargain_unknown_area_lead")
 
             # 不正面回答（让先报价）→ 拉回正题
             dodge_keywords = ["你先报", "先报个价", "合适再说", "你说说", "报个价"]
@@ -1742,7 +1781,6 @@ class CustomerServiceEngine:
         fallback        - 听不懂/不确定/其他
         """
         import hashlib
-        import re
 
         # 缓存key：包含上下文（同样的话，上下文不同分类可能不同）
         cache_content = text.strip() + (prev_user or "") + (prev_bot or "")
@@ -2995,9 +3033,9 @@ class CustomerServiceEngine:
             if self.bargain_step == 1:
                 rec_result = self._get_recommendation(text)
                 if rec_result:
-                    print(f"  分支走向: Step1推荐逻辑（非价格类但命中推荐）")
+                    print("  分支走向: Step1推荐逻辑（非价格类但命中推荐）")
                 else:
-                    print(f"  分支走向: 退出状态机（非价格类且无推荐）")
+                    print("  分支走向: 退出状态机（非价格类且无推荐）")
                     self.bargain_step = 0
                     self.bargain_pullback_count = 0
                     return None, None
@@ -3005,7 +3043,7 @@ class CustomerServiceEngine:
             elif self.bargain_step >= 2:
                 print(f"  分支走向: Step{self.bargain_step}追问处理（非价格类，保持状态）")
             else:
-                print(f"  分支走向: 退出状态机（非价格类且不在议价中）")
+                print("  分支走向: 退出状态机（非价格类且不在议价中）")
                 self.bargain_step = 0
                 self.bargain_pullback_count = 0
                 return None, None
@@ -3096,19 +3134,19 @@ class CustomerServiceEngine:
                             "edge_banding": self.config.get("edge_band", ""),
                         }
                     )
-                    print(f"  模板渲染: bargain_recommendation_v2 成功")
+                    print("  模板渲染: bargain_recommendation_v2 成功")
                 except Exception as e:
                     print(f"  模板渲染: bargain_recommendation_v2 失败: {e}")
                     # 渲染失败 → fallback到老模板
                     recommend_text = self._render_bargain_template(
                         "bargain_material_price", material=mat_key
                     )
-                    print(f"  fallback到老模板: bargain_material_price")
+                    print("  fallback到老模板: bargain_material_price")
                 full_answer = recommend_text + "\n" + follow_up
                 print(f"  最终回答: {full_answer[:80]}...")
                 return f"bargain/recommend/{scene_key}", full_answer
             else:
-                print(f"  _get_recommendation 返回: None（无推荐结果）")
+                print("  _get_recommendation 返回: None（无推荐结果）")
 
             # 用户嫌贵/拿竞品比 → 价值塑造，不推进
             if llm_category == "complain_price":
