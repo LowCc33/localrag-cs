@@ -1,0 +1,164 @@
+{
+  "basic_info": {
+    "shop_name": "安徽维慕斯智能全铝家居有限公司",
+    "boss_name": "宋姐",
+    "years_in_business": 10,
+    "city": "合肥",
+    "shop_location": "合肥市包河区太原路28号",
+    "wechat_id": "13584129808",
+    "after_sales_phone": "4006811018",
+    "default_material": "aluminum_welded",
+    "main_material": "carbon_resin"
+  },
+  "pricing": {
+    "base_price_method": "展开面积",
+    "drawer_price": 299,
+    "visible_panel_price": 599,
+    "handle_price": 39,
+    "measurement_fee": "免费（下定可退）",
+    "installation_fee": "免费（市区内包安装）",
+    "delivery_fee": "免费（市区内包运输）",
+    "design_fee": "免费（下定后免费出设计图）"
+  },
+  "materials": {
+    "default_board_brand": "捷定",
+    "default_eco_level": "零甲醛",
+    "default_edge_band": "激光封边",
+    "default_hardware_brand": "悍高",
+    "boards": [
+      {
+        "key": "aluminum_welded",
+        "name": "全铝焊接大板",
+        "brand": "捷定",
+        "eco_level": "零甲醛",
+        "price": 980,
+        "is_default": true,
+        "is_premium": false,
+        "keywords": [
+          "全铝焊接大板",
+          "焊接大板",
+          "全铝板",
+          "铝大板",
+          "980"
+        ]
+      },
+      {
+        "key": "aluminum_honeycomb",
+        "name": "全铝蜂窝板",
+        "brand": "捷定",
+        "eco_level": "零甲醛",
+        "price": 680,
+        "is_default": false,
+        "is_premium": false,
+        "keywords": [
+          "全铝蜂窝板",
+          "蜂窝板",
+          "铝蜂窝",
+          "680"
+        ]
+      },
+      {
+        "key": "spc_honeycomb",
+        "name": "SPC蜂窝板",
+        "brand": "捷定",
+        "eco_level": "零甲醛",
+        "price": 480,
+        "is_default": false,
+        "is_premium": false,
+        "keywords": [
+          "SPC蜂窝板",
+          "spc板",
+          "SPC",
+          "480"
+        ]
+      },
+      {
+        "key": "carbon_resin",
+        "name": "碳脂板",
+        "brand": "捷定",
+        "eco_level": "零甲醛",
+        "price": 1180,
+        "is_default": false,
+        "is_premium": true,
+        "keywords": [
+          "碳脂板",
+          "碳岩板",
+          "碳纤维",
+          "1180"
+        ]
+      }
+    ]
+  },
+  "processes": [
+    {
+      "key": "six_side_seamless",
+      "name": "六面无缝",
+      "keywords": [
+        "六面无缝",
+        "无缝工艺",
+        "六面无缝工艺",
+        "无缝拼接"
+      ],
+      "answer_template": "六面无缝工艺我们是专业的，板子四面开槽，组装后完全看不到拼缝，效果特别精致。您加我微信{{wechat_id}}，我发您看看实景效果。"
+    },
+    {
+      "key": "laser_edge",
+      "name": "激光封边",
+      "keywords": [
+        "激光封边",
+        "激光边",
+        "激光"
+      ],
+      "answer_template": "我们家用的是激光封边，比传统PUR封边更牢固更美观，封边条和板材完全融为一体，摸上去没有台阶感。您加我微信{{wechat_id}}，我给您看看样品对比。"
+    }
+  ],
+  "payment_terms": {
+    "deposit": "80%",
+    "production_pay": "设计确认后付80%生产款",
+    "final_pay": "安装验收后付20%",
+    "refundable": "量房前可退",
+    "warranty_years": "终身",
+    "after_sales_phone": "4006811018",
+    "deposit_explanation": "我们家定金确实是80%，因为全铝材料成本高，都是定尺定制的，一旦您这边不要了，这批材料就废了，我们损失很大。您放心，我们合肥10年工厂店，5000平厂房就在包河，绝对不会跑路，合同都写得明明白白的。"
+  },
+  "production_cycle": {
+    "design_days": "3",
+    "production_days": "25",
+    "install_days": "5",
+    "rush_available": false,
+    "rush_days": "",
+    "repair_days": "48小时内"
+  },
+  "trust_points": {
+    "factory_location": "合肥包河区",
+    "factory_size": "5000平",
+    "community_cases": "合肥200多个小区都有案例",
+    "boss_is_local": "安庆人，在合肥做了10年"
+  },
+  "selling_points": [
+    "工厂直营，比门店便宜20%",
+    "老板亲自盯工地，质量有保障",
+    "合肥本地10年工厂店，售后随叫随到",
+    "全铝材质零甲醛，装完就能住，防潮防火不变形",
+    "免费量房免费设计，不满意不收钱"
+  ],
+  "concessions": [
+    "下定送2个抽屉",
+    "满5万送3平吊顶铝蜂窝大板",
+    "老客户介绍再减500",
+    "团购3户以上再打95折"
+  ],
+  "urgency_factors": [
+    "这个月冲业绩，价格最低，下个月就涨价",
+    "铝材最近要涨价，早下定早锁定价格",
+    "现在排单到下个月了，早定早安装",
+    "本周有厂购会，能拿工厂直供价"
+  ],
+  "lead_hooks": [
+    "您加我微信{{wechat_id}}，我把报价单和材料样册发您看看",
+    "加我微信，我发您几个你们小区的案例参考",
+    "您加我微信吧，我让设计师给您免费出个方案",
+    "微信上说方便，有什么问题随时问我"
+  ],
+  "warranty": "柜体非人为破坏终身质保，五金5年质保，终身维护"
+}

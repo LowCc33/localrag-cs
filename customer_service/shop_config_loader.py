@@ -159,7 +159,8 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
         "_processes": processes,  # 原始工艺列表，引擎侧合并模板用
 
         # === 付款方式 ===
-        "payment_terms": {
+        # 优先用配置顶层的payment_terms（新格式），没有则从service/basic拼装（旧格式）
+        "payment_terms": json_cfg.get("payment_terms") or {
             "deposit": service.get("deposit_ratio", "50%"),
             "production_pay": "45%",
             "final_pay": "5%",
@@ -181,7 +182,8 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
         }),
 
         # === 工期 ===
-        "production_cycle": {
+        # 优先用配置顶层的production_cycle（新格式），没有则从service拼装（旧格式）
+        "production_cycle": json_cfg.get("production_cycle") or {
             "design_days": str(service.get("design_days", "7")),
             "production_days": str(service.get("production_cycle_days", "30-45")),
             "install_days": str(service.get("install_days", "1-2")),
@@ -191,7 +193,8 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
         },
 
         # === 品牌信任 ===
-        "trust_points": {
+        # 优先用配置顶层的trust_points（新格式），没有则默认拼装（旧格式）
+        "trust_points": json_cfg.get("trust_points") or {
             "factory_location": f"{basic.get('city', '本地')}本地工厂",
             "factory_size": "中等规模，2条生产线",
             "community_cases": sales.get("community_cases", []),
@@ -199,13 +202,14 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
         },
 
         # === 话术池 ===
-        "concessions": sales.get("concessions", []),
-        "urgency_factors": sales.get("urgency_factors", []),
-        "selling_points": sales.get("selling_points", []),
-        "lead_hooks": sales.get("lead_hooks", []),
+        # 支持两种格式：1) sales_script.concessions（旧） 2) 顶层concessions（新）
+        "concessions": sales.get("concessions", []) or json_cfg.get("concessions", []),
+        "urgency_factors": sales.get("urgency_factors", []) or json_cfg.get("urgency_factors", []),
+        "selling_points": sales.get("selling_points", []) or json_cfg.get("selling_points", []),
+        "lead_hooks": sales.get("lead_hooks", []) or json_cfg.get("lead_hooks", []),
 
         # === 兼容旧字段 ===
-        "warranty": service.get("after_sales_scope", ""),
+        "warranty": service.get("after_sales_scope", "") or json_cfg.get("warranty", ""),
     }
 
     return result

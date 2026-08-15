@@ -43,12 +43,17 @@ class CustomerServiceEngine:
             shop_id: 商家ID，不传则使用默认配置（向后兼容）
         """
         self.shop_id = shop_id
+        # 1) 加载公用模板库
         with open(os.path.join(BASE_DIR, "templates.yaml"), encoding="utf-8") as f:
-            self.templates = yaml.safe_load(f)
-        # 加载二维推荐矩阵（场景 × 偏好 → 材料 + 理由）
+            self.templates = yaml.safe_load(f) or {}
+        # 2) 加载公用推荐矩阵
         with open(os.path.join(BASE_DIR, "recommendation_matrix.yaml"), encoding="utf-8") as f:
-            self.rec_matrix = yaml.safe_load(f)
-        # 根据 shop_id 加载对应商家配置（None 则用默认配置）
+            self.rec_matrix = yaml.safe_load(f) or {}
+        # 3) 商家私有模板覆盖（如果有 shop_id 且对应文件存在）
+        if shop_id:
+            self._apply_shop_templates(shop_id)
+            self._apply_shop_rec_matrix(shop_id)
+        # 4) 根据 shop_id 加载对应商家配置（None 则用默认配置）
         self.config = load_shop_config(shop_id)
         self.history = []                # 上下文记忆，最多留 3 轮
         self.chat_streak = 0             # 连续闲扯计数器（软收尾用）
@@ -109,6 +114,173 @@ class CustomerServiceEngine:
         hook_template = random.choice(self.config.get("lead_hooks", [""]))
         # 钩子模板里只有 wechat_id 变量，直接替换
         return hook_template.replace("{{wechat_id}}", self.config.get("wechat_id", ""))
+
+    # ---------- 商家私有模板覆盖 ----------
+    def _apply_shop_templates(self, shop_id: str):
+        """
+        加载商家私有模板并覆盖到公用模板上（商家优先级更高）
+        支持两种格式：
+        1) 与公用模板同结构（顶层bargain/complain/hot_questions等）→ 直接覆盖
+        2) 商家自定义格式（price_inquiry_templates等模块名）→ 自动映射到对应hot_questions category
+        商家没有的键，继续用公用的
+        """
+        shop_tpl_path = os.path.join(BASE_DIR, "shops", f"{shop_id}_templates.yaml")
+        if not os.path.exists(shop_tpl_path):
+            return
+        try:
+            with open(shop_tpl_path, encoding="utf-8") as f:
+                shop_templates = yaml.safe_load(f) or {}
+        except Exception as e:
+            print(f"[模板加载] 商家{shop_id}模板加载失败: {e}")
+            return
+
+        # 商家模板 → 公用模板hot_questions category 的映射表
+        # key: 商家模板里的字段名, value: 对应hot_questions的category
+        category_mapping = {
+            "price_inquiry_templates": "bargain_price_range",
+            "material_price_templates": "bargain_material_price",
+            "material_list_templates": "bargain_material_list",
+            "material_compare_templates": "material_compare",
+            "value_building_templates": "bargain_value_build",
+            "aluminum_vs_wood_templates": "aluminum_vs_wood",
+            "eco_zero_formaldehyde_templates": "eco_level",
+            "shop_info_templates": "shop_info",
+        }
+
+        # 收集要覆盖到 hot_questions 的条目
+        shop_hot_overrides = {}  # category -> templates列表
+
+        # 遍历商家模板所有顶层键
+        for key, value in shop_templates.items():
+            if key == "recommendation_matrix":
+                # 推荐矩阵单独处理（在 _apply_shop_rec_matrix 里）
+                continue
+            elif key == "hot_questions":
+                # 直接给hot_questions列表的，走原来的合并逻辑
+                self._merge_hot_questions(value)
+                continue
+            elif key in ["bargain", "complain", "consult", "chat", "unknown_question",
+                         "confirm_yes_templates", "confirm_no_templates"]:
+                # 跟公用模板顶层同名的，直接覆盖
+                self.templates[key] = value
+            elif key in category_mapping:
+                # 商家自定义模块名 → 映射到对应hot_questions category
+                cat = category_mapping[key]
+                if isinstance(value, list) and value:
+                    shop_hot_overrides[cat] = value
+            # 其他key暂时忽略
+
+        # 应用 hot_questions 覆盖
+        if shop_hot_overrides:
+            self._override_hot_question_templates(shop_hot_overrides)
+
+        print(f"[模板加载] 已应用商家 {shop_id} 私有模板")
+
+    def _override_hot_question_templates(self, overrides: dict):
+        """
+        覆盖hot_questions中指定category的templates列表
+        overrides: {category_name: [new_templates_list]}
+        - category已存在：替换其templates
+        - category不存在：新增一条hot_question条目（关键词留空，靠LLM分类触发）
+        """
+        hot_questions = self.templates.get("hot_questions", [])
+        if not hot_questions:
+            hot_questions = []
+
+        for category, templates_list in overrides.items():
+            found = False
+            for hq in hot_questions:
+                if hq.get("category") == category:
+                    hq["templates"] = templates_list
+                    found = True
+                    break
+            if not found:
+                # 新增一个条目（关键词留空，主要靠LLM分类触发）
+                hot_questions.append({
+                    "category": category,
+                    "keywords": [],
+                    "templates": templates_list
+                })
+
+        self.templates["hot_questions"] = hot_questions
+
+    def _merge_hot_questions(self, shop_hot_questions: list):
+        """
+        合并商家 hot_questions 到公用模板
+        - 相同 category 的，商家覆盖公用
+        - 新 category 的，直接追加
+        - 同 category 有多条的，按 category 全替换
+        """
+        if not shop_hot_questions:
+            return
+        # 收集商家所有 category
+        shop_categories = {}
+        for hq in shop_hot_questions:
+            cat = hq.get("category", "")
+            if cat not in shop_categories:
+                shop_categories[cat] = []
+            shop_categories[cat].append(hq)
+
+        # 过滤掉公用模板中被商家覆盖的 category
+        public_hot = self.templates.get("hot_questions", [])
+        merged = [hq for hq in public_hot if hq.get("category", "") not in shop_categories]
+
+        # 追加商家的 hot_questions
+        for cat_hqs in shop_categories.values():
+            merged.extend(cat_hqs)
+
+        self.templates["hot_questions"] = merged
+
+    def _apply_shop_rec_matrix(self, shop_id: str):
+        """
+        加载商家私有推荐矩阵并覆盖到公用矩阵上
+        商家推荐矩阵可以放在两个地方（按优先级）：
+        1) shops/{shop_id}_templates.yaml 中的 recommendation_matrix 字段（推荐）
+        2) 独立文件 shops/{shop_id}_rec_matrix.yaml
+        - scene_names / preference_names / scene_follow_up：整体覆盖（商家有就用商家的）
+        - matrix：按场景逐层覆盖（商家有这个场景就全用商家的，没有就用公用的）
+        """
+        shop_matrix_data = None
+
+        # 先尝试从商家模板文件里读 recommendation_matrix 字段
+        shop_tpl_path = os.path.join(BASE_DIR, "shops", f"{shop_id}_templates.yaml")
+        if os.path.exists(shop_tpl_path):
+            try:
+                with open(shop_tpl_path, encoding="utf-8") as f:
+                    shop_templates = yaml.safe_load(f) or {}
+                if "recommendation_matrix" in shop_templates:
+                    shop_matrix_data = {"matrix": shop_templates["recommendation_matrix"]}
+            except Exception as e:
+                print(f"[推荐矩阵] 从模板文件读取商家{shop_id}矩阵失败: {e}")
+
+        # 如果模板文件里没有，再试试独立矩阵文件
+        if not shop_matrix_data:
+            shop_matrix_path = os.path.join(BASE_DIR, "shops", f"{shop_id}_rec_matrix.yaml")
+            if not os.path.exists(shop_matrix_path):
+                return
+            try:
+                with open(shop_matrix_path, encoding="utf-8") as f:
+                    shop_matrix_data = yaml.safe_load(f) or {}
+            except Exception as e:
+                print(f"[推荐矩阵] 商家{shop_id}矩阵加载失败: {e}")
+                return
+
+        if not shop_matrix_data:
+            return
+
+        # 顶层简单键直接覆盖
+        for key in ["scene_names", "preference_names", "scene_follow_up"]:
+            if key in shop_matrix_data:
+                self.rec_matrix[key] = shop_matrix_data[key]
+
+        # matrix 按场景逐层覆盖
+        if "matrix" in shop_matrix_data:
+            public_matrix = self.rec_matrix.get("matrix", {})
+            shop_matrix = shop_matrix_data["matrix"] or {}
+            merged_matrix = {**public_matrix, **shop_matrix}
+            self.rec_matrix["matrix"] = merged_matrix
+
+        print(f"[推荐矩阵] 已应用商家 {shop_id} 私有推荐矩阵")
 
     def _render(self, raw):
         """用 jinja2 渲染单条模板字符串"""
@@ -256,7 +428,25 @@ class CustomerServiceEngine:
         """
         import re
 
-        # 1. 面积检测（最高优先级，精确值）：数字 + 个(可选) + 平方/平米/平/㎡
+        # 1. 面积检测（最高优先级）：精确值 + 模糊范围，按匹配优先级从高到低
+        # 支持：精确数字 / 7-8平 / 7 8个平 / 七八平 / 十来个平方 等
+
+        # 1.1 阿拉伯数字模糊范围（优先级高于单个数字）："7 8个平" "7-8平" "7~8个平方" 这种
+        # ponytail: 两个数字之间必须有空格或分隔符，防止"10"被误拆成"1-0"
+        fuzzy_area_match = re.search(r'(\d+)(?:\s+|[-~到至])(\d+)\s*(?:个)?\s*(?:平方|平米|平|㎡)', text)
+        if fuzzy_area_match:
+            low = float(fuzzy_area_match.group(1))
+            high = float(fuzzy_area_match.group(2))
+            avg_area = (low + high) / 2
+            raw_desc = f"{int(low)}-{int(high)}"
+            if avg_area >= 30:
+                return ("large", "area", raw_desc)
+            elif avg_area >= 6:
+                return ("medium", "area", raw_desc)
+            else:
+                return ("small", "area", raw_desc)
+
+        # 1.2 单个数字（精确值）
         area_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:个)?\s*(?:平方|平米|平|㎡)', text)
         if area_match:
             raw = area_match.group(1)
@@ -267,6 +457,24 @@ class CustomerServiceEngine:
                 return ("medium", "area", raw)
             else:
                 return ("small", "area", raw)
+
+        # 1.3 汉字数字模糊范围："七八个平" "五六平" "十来个平方" 这种
+        # ponytail: 按长度从长到短排，避免"十几"误匹配"二十几"；长字符串优先
+        cn_fuzzy_area_patterns = [
+            ("二十几", 22), ("三十几", 32), ("二三十", 25),
+            ("一两", 1.5), ("二三", 2.5), ("三四", 3.5), ("四五", 4.5),
+            ("五六", 5.5), ("六七", 6.5), ("七八", 7.5), ("八九", 8.5),
+            ("九十", 9.5), ("十来", 10), ("十几", 12),
+        ]
+        for pattern, avg_val in cn_fuzzy_area_patterns:
+            # 前面不是汉字数字，避免"二十几"被"十几"匹配
+            if re.search(r'(?<![一二三四五六七八九十两])' + pattern + r'\s*(?:个)?\s*(?:平方|平米|平|㎡)', text):
+                if avg_val >= 30:
+                    return ("large", "area", pattern)
+                elif avg_val >= 6:
+                    return ("medium", "area", pattern)
+                else:
+                    return ("small", "area", pattern)
 
         # 2. 柜子数量检测（降级估算面积，每柜按3.5㎡换算）
         # ponytail: 柜子数量降级为面积估算，标记input_type=count，话术里带"大概"
@@ -628,6 +836,32 @@ class CustomerServiceEngine:
                     "bargain_material_price", material=material
                 )
 
+            # 补充新场景推荐：用户提到新场景（客厅/卧室等）但没说具体材料 → 沿用已选材料，给补充场景话术
+            # ponytail: v2兜底，防止LLM选不对动作时直接拉回正题
+            scene_key, scene_name = self._detect_room_type(text)
+            if scene_key and self.selected_material:
+                # 查推荐矩阵，获取这个场景用当前材料的理由
+                rec_reason = f"{scene_name}也用{get_material_name(self.selected_material, self.config)}就行，整体风格统一，施工也方便"
+                matrix = self.rec_matrix.get("matrix", {})
+                scene_config = matrix.get(scene_key, {})
+                if scene_config:
+                    # 找一个最接近的偏好的理由（recommend_me 或 balanced）
+                    for pref in ["recommend_me", "balanced", "eco_friendly", "cost_effective"]:
+                        if pref in scene_config and scene_config[pref].get("material") == self.selected_material:
+                            rec_reason = scene_config[pref].get("reason", rec_reason)
+                            break
+                self.bargain_pullback_count = 0
+                extra_vars = {
+                    "recommend_reason": rec_reason,
+                    "scene_name": scene_name,
+                }
+                reply = self._render_bargain_template(
+                    "bargain_supplement_scene",
+                    material=self.selected_material,
+                    extra_vars=extra_vars
+                )
+                return "supplement_scene", reply
+
             # 说了面积/数量 → 按材料+数量直接给优惠价，跳step4
             if size_val:
                 self.bargain_step = 4
@@ -764,6 +998,35 @@ class CustomerServiceEngine:
                         mat_brand = get_material_brand(material, self.config)
                         if mat_brand:
                             vars_dict["board_brand"] = mat_brand
+
+                    # 厨房/橱柜场景特殊计价：延米 + 台面另算
+                    # ponytail: 从历史消息和当前上下文中检测厨房场景，动态替换计价方式
+                    kitchen_keywords = ["厨房", "橱柜", "厨柜", "灶台", "厨房柜", "厨房柜子"]
+                    has_kitchen = False
+                    # 检查extra_vars里有没有场景信息
+                    scene_name = vars_dict.get("scene_name", "")
+                    if scene_name and any(kw in scene_name for kw in kitchen_keywords):
+                        has_kitchen = True
+                    # 检查历史消息
+                    if not has_kitchen:
+                        for h in self.history:
+                            if any(kw in h.get("user", "") for kw in kitchen_keywords):
+                                has_kitchen = True
+                                break
+                    if has_kitchen:
+                        kitchen_cfg = self.config.get("_kitchen_pricing", {})
+                        if kitchen_cfg:
+                            vars_dict["price_method"] = kitchen_cfg.get("price_method", "延米")
+                            vars_dict["price_unit"] = "一延米"
+                            ct_material = kitchen_cfg.get("countertop_material", "石英石台面")
+                            ct_price = kitchen_cfg.get("countertop_price", 680)
+                            vars_dict["countertop_note"] = f"\n对了，橱柜是柜体价，{ct_material}{ct_price}元/米另算哈。"
+                        else:
+                            vars_dict["price_unit"] = "一平"
+                            vars_dict["countertop_note"] = ""
+                    else:
+                        vars_dict["price_unit"] = "一平"
+                        vars_dict["countertop_note"] = ""
                     # 价格区间模板也需要这些变量
                     if category_name == "bargain_price_range":
                         vars_dict["price_range_low"], vars_dict["price_range_high"] = get_price_range(self.config)
@@ -1468,14 +1731,36 @@ class CustomerServiceEngine:
     def _detect_contact_info(self, text):
         """
         留资检测：识别用户是否留了联系方式
-        返回：phone / wechat / address / appointment / None
+        返回：phone / phone_invalid / wechat / address / appointment / None
         优先级：最高，放主逻辑最前面
         """
         import re
 
-        # 1. 手机号正则（11位，1开头第二位3-9）
-        if re.search(r'1[3-9]\d{9}', text):
+        # 0. 先提取纯数字串（用于判断是不是疑似手机号但位数不对）
+        digits_match = re.search(r'\d{7,15}', text)
+        has_digits = digits_match is not None
+        digits_len = len(digits_match.group(0)) if digits_match else 0
+
+        # 1. 手机号正则（11位，1开头第二位3-9）—— 正确格式，前后不能是数字
+        if re.search(r'(?<!\d)1[3-9]\d{9}(?!\d)', text):
             return "phone"
+
+        # 1.5 疑似手机号但格式不对（7-15位数字，但不符合正确手机号格式）
+        # ponytail: 上下文是留资场景时，用户发一串数字大概率是手机号，
+        # 如果位数不对/格式不对，要礼貌提醒，而不是当成没听懂
+        if has_digits and digits_len >= 7 and digits_len <= 15 and digits_len != 11:
+            # 再确认下不是固话（固话0开头带区号的前面已经匹配过就不会走到这）
+            # 同时排除价格数字（几百几千那种太短的已经被7位过滤了）
+            # 如果有电话/留资相关关键词，或者上下文是留资场景，判定为错误手机号
+            phone_context_keywords = [
+                "电话", "手机", "联系方式", "留个", "我的号码", "我号码",
+                "手机号", "微信号", "加微信", "联系我", "打给我",
+            ]
+            has_phone_context = any(kw in text for kw in phone_context_keywords)
+            # 10位或12位的纯数字，非常像手机号（可能多/少写了一位），即使没关键词也算
+            looks_like_phone = (digits_len == 10 or digits_len == 12) and not text.startswith('0')
+            if has_phone_context or looks_like_phone:
+                return "phone_invalid"
 
         # 2. 座机号（带区号的固话）
         if re.search(r'0\d{2,3}[ -]?\d{7,8}', text):
@@ -2098,12 +2383,41 @@ class CustomerServiceEngine:
         if contact_type is not None:
             self.bargain_step = 0
             self.bargain_pullback_count = 0
+            import random
+            from jinja2 import Template
+
+            # 手机号格式不对 → 提醒重发
+            if contact_type == "phone_invalid":
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == "lead_phone_invalid":
+                        tpl_list = hot_q.get("templates", [])
+                        if tpl_list:
+                            answer = Template(random.choice(tpl_list)).render(**self._vars())
+                            self.history.append({"user": text, "bot": answer})
+                            self.history = self.history[-3:]
+                            return "lead_phone_invalid", answer
+                # 兜底
+                answer = "不好意思，这个手机号好像位数不对呢，您方便再核对下发我一下吗？"
+                self.history.append({"user": text, "bot": answer})
+                self.history = self.history[-3:]
+                return "lead_phone_invalid", answer
+
+            # 正确手机号 → 专属感谢话术 + 引导需求
+            if contact_type == "phone":
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == "lead_phone_success":
+                        tpl_list = hot_q.get("templates", [])
+                        if tpl_list:
+                            answer = Template(random.choice(tpl_list)).render(**self._vars())
+                            self.history.append({"user": text, "bot": answer})
+                            self.history = self.history[-3:]
+                            return "lead_capture/phone", answer
+
+            # 其他留资（微信/地址等）→ 通用留资成功话术
             for hot_q in self.templates.get("hot_questions", []):
                 if hot_q.get("category") == "lead_capture_success":
                     tpl_list = hot_q.get("templates", [])
                     if tpl_list:
-                        import random
-                        from jinja2 import Template
                         answer = Template(random.choice(tpl_list)).render(**self._vars())
                         self.history.append({"user": text, "bot": answer})
                         self.history = self.history[-3:]
@@ -2307,7 +2621,8 @@ class CustomerServiceEngine:
         """
         lead_hooks = self.config.get("lead_hooks", [])
         if lead_hooks:
-            return random.choice(lead_hooks)
+            # 注意：lead_hooks 里可能有 {{wechat_id}} 变量，需要渲染
+            return self._render_lead_hook()
         # 兜底引导
         fallbacks = [
             "您家房子多大呀？我给您大概算个价？",
@@ -2471,6 +2786,121 @@ class CustomerServiceEngine:
             return bool(self.config.get("hardware_brand"))
         return False
 
+    # ---------- ES知识库检索 ----------
+    def _search_knowledge_base(self, text, top_k=3):
+        """
+        检索商家知识库（通用 + 商家私有）
+        - kb_id 过滤：只搜 common 和 shop_{shop_id}
+        - 商家私有知识优先级高于通用知识（检索后重排序）
+        - 检索失败返回空列表，不影响主流程
+        
+        Args:
+            text: 用户问题
+            top_k: 返回条数
+            
+        Returns:
+            list of {question, answer, kb_id, category, score}
+        """
+        try:
+            from core.es_client import ElasticsearchClient
+            es = ElasticsearchClient()
+            index_name = "cs_knowledge"
+            
+            # 确认索引存在
+            if not es.client.indices.exists(index=index_name):
+                return []
+            
+            # 构建 kb_id 过滤列表
+            kb_filter = ["common"]
+            if self.shop_id:
+                kb_filter.append(f"shop_{self.shop_id}")
+            
+            # BM25检索（question和answer都搜）
+            query = {
+                "bool": {
+                    "must": [
+                        {
+                            "multi_match": {
+                                "query": text,
+                                "fields": ["question^3", "answer"],
+                                "type": "best_fields"
+                            }
+                        }
+                    ],
+                    "filter": [
+                        {
+                            "terms": {
+                                "kb_id": kb_filter
+                            }
+                        }
+                    ]
+                }
+            }
+            
+            result = es.client.search(
+                index=index_name,
+                body={
+                    "query": query,
+                    "size": top_k * 2,  # 多拉一些，后面重排序
+                    "_source": ["question", "answer", "kb_id", "category"]
+                }
+            )
+            
+            hits = result.get("hits", {}).get("hits", [])
+            if not hits:
+                return []
+            
+            # 格式化结果
+            results = []
+            for hit in hits:
+                src = hit["_source"]
+                results.append({
+                    "question": src.get("question", ""),
+                    "answer": src.get("answer", ""),
+                    "kb_id": src.get("kb_id", ""),
+                    "category": src.get("category", ""),
+                    "score": hit.get("_score", 0)
+                })
+            
+            # 商家私有知识优先：相同分数下，shop_ 开头的排前面
+            # 策略：商家私有结果的 score 乘以 1.2（加权）
+            for r in results:
+                if r["kb_id"].startswith("shop_"):
+                    r["score"] = r["score"] * 1.2
+            
+            # 重新排序
+            results.sort(key=lambda x: x["score"], reverse=True)
+            
+            return results[:top_k]
+            
+        except Exception as e:
+            # 知识库检索失败不影响主流程，静默降级
+            print(f"[知识库检索] 失败: {e}")
+            return []
+
+    def _kb_answer_if_confident(self, text):
+        """
+        知识库自信回答：如果检索结果相关性足够高，直接用知识库答案
+        - 只有最高分超过阈值才认为可信
+        - 返回 (tag, answer) 或 None
+        """
+        results = self._search_knowledge_base(text, top_k=1)
+        if not results:
+            return None
+        
+        top = results[0]
+        # 简单阈值：score > 2.0 认为足够相关（ES BM25分数，经验值）
+        if top["score"] < 2.0:
+            return None
+        
+        answer = top["answer"]
+        # 加引导留资
+        if self.bargain_step == 0:
+            answer += "\n" + self._get_lead_follow_up()
+        
+        return f"kb/{top['category']}", answer
+
+
     def _render(self, template_str, extra_vars=None):
         """
         渲染单个模板字符串，注入配置变量
@@ -2502,7 +2932,7 @@ class CustomerServiceEngine:
 11. advance_from_step2 - 从Step2推进到Step3（摸底）。适用：Step2时用户对价格/材料表示认可
 12. confirm_intent - 反问确认用户意图。适用：用户输入太模糊，不知道想干什么
 13. compare_materials - 回答材料对比/质疑类问题。适用：用户问"XX板不好吗""XX和XX哪个好""为什么不推荐XX""XX板怎么样"；detail_param传JSON字符串，包含{affirmed_material:"被肯定的材料key", affirm_reason:"为什么说它也不错", recommend_reason:"为什么推荐当前材料（结合场景）", choice_message:"选择权还给用户的话"}
-14. supplement_scene - 补充场景推荐。适用：Step2时用户补充新场景/新房间（如"还有卧室呢""厨房也做""衣柜也要"），表示在问新场景用什么材料多少钱；detail_param传推荐理由（一句话，说明为什么当前材料也适合这个新场景，口语化）
+14. supplement_scene - 补充场景推荐。适用：Step2时用户补充新场景/新房间（如"还有卧室呢""厨房也做""衣柜也要""客厅用什么合适""橱柜用什么板""榻榻米呢"），表示在问新场景用什么材料/多少钱；用户问的是新空间/新房间/新柜子的选材或价格，而不是在换材料；detail_param传JSON字符串：{"scene":"场景名（如客厅/厨房/衣柜）", "reason":"推荐理由（一句话，说明为什么当前已选材料也适合这个新场景，口语化）"}
 """
 
     def _llm_bargain_decision(self, text):
@@ -2677,10 +3107,22 @@ class CustomerServiceEngine:
         状态更新：bargain_step=2, selected_material=指定材料
         """
         material = detail_param or self.config.get("main_material", "multi_layer_board")
-        # 校验材料合法性，不合法就用主推
         valid_materials = list(self.config.get("_board_keywords_map", {}).keys())
+        
+        # 校验材料合法性，不合法就用关键词匹配从用户输入里检测
         if material not in valid_materials and valid_materials:
-            material = self.config.get("main_material", "multi_layer_board")
+            # LLM返回的key不对，用关键词匹配来检测
+            text = getattr(self, "_current_bargain_text", "")
+            if text:
+                detected = self._detect_material_choice(text)
+                if detected and detected in valid_materials:
+                    material = detected
+                else:
+                    # 关键词也没检测到，降级到主推
+                    material = self.config.get("main_material", valid_materials[0])
+            else:
+                material = self.config.get("main_material", valid_materials[0] if valid_materials else "multi_layer_board")
+        
         reply = self._render_bargain_template("bargain_material_price", material=material)
         state_updates = {"bargain_step": 2, "selected_material": material, "bargain_pullback_count": 0}
         return "bargain/quote_material_price", reply, state_updates
@@ -2699,13 +3141,37 @@ class CustomerServiceEngine:
         动作：回答材料/工艺/五金等详情问题，回答后追加拉回议价的话术
         状态更新：bargain_step 不变
         """
-        # 复用现有的分类模板渲染逻辑
+        # 策略：先关键词匹配 → 再工艺匹配 → 再知识库检索 → 最后分类模板兜底
         detail_answer = None
-        if detail_param:
-            detail_answer = self._render_category_template(detail_param)
+        
+        # 从v3保存的当前输入取用户原文
+        text = getattr(self, "_current_bargain_text", "")
+        
+        if text:
+            # 1) 关键词匹配hot_questions
+            hot_result = self._match_hot_question(text)
+            if hot_result:
+                _, detail_answer = hot_result
+            
+            # 2) 工艺匹配
+            if not detail_answer:
+                process_match = self._match_process_by_keywords(text)
+                if process_match:
+                    pkey, pname, can_do, atpl = process_match
+                    detail_answer = self._get_process_answer(pkey, pname, can_do, atpl)
+            
+            # 3) 知识库检索（高分才用）
+            if not detail_answer:
+                kb_results = self._search_knowledge_base(text, top_k=1)
+                if kb_results and kb_results[0]["score"] > 3.0:
+                    detail_answer = kb_results[0]["answer"]
+        
+        # 4) 分类模板渲染兜底
+        if not detail_answer and detail_param:
+            detail_answer = self._render_category_template(detail_param, text)
         if not detail_answer:
             # 兜底：用材料详情模板
-            detail_answer = self._render_category_template("material_detail")
+            detail_answer = self._render_category_template("material_detail", text)
         if not detail_answer:
             detail_answer = "这个您放心，我们家用的都是达标材料，质量有保障。"
         
@@ -2744,9 +3210,40 @@ class CustomerServiceEngine:
     def _action_pullback_topic(self, detail_param):
         """
         动作：拉回议价主题
+        策略：先试试能不能回答事实类问题（店铺信息、售后、工期等），能答就先答再拉回
         状态更新：bargain_pullback_count + 1，达到阈值就引导加微信
         """
+        text = getattr(self, "_current_bargain_text", "")
+        
+        # 先试试关键词匹配事实类问题，能答就先答再拉回
+        detail_answer = None
+        if text:
+            # 关键词匹配
+            hot_result = self._match_hot_question(text)
+            if hot_result:
+                _, detail_answer = hot_result
+            # 工艺匹配
+            if not detail_answer:
+                process_match = self._match_process_by_keywords(text)
+                if process_match:
+                    pkey, pname, can_do, atpl = process_match
+                    detail_answer = self._get_process_answer(pkey, pname, can_do, atpl)
+            # 知识库检索（高分才用）
+            if not detail_answer:
+                kb_results = self._search_knowledge_base(text, top_k=1)
+                if kb_results and kb_results[0]["score"] > 4.0:
+                    detail_answer = kb_results[0]["answer"]
+        
         new_count = self.bargain_pullback_count + 1
+        
+        # 有事实答案 → 先答再拉回（不增加pullback计数，因为回答了问题）
+        if detail_answer:
+            pullback = self._render_pullback_template(step=max(1, min(self.bargain_step, 4)))
+            full_answer = detail_answer + "\n" + pullback
+            # ponytail: 回答了事实问题就不算扯远，不增加计数，避免太早引导加微信
+            return "bargain/pullback_topic", full_answer, {"bargain_pullback_count": self.bargain_pullback_count}
+        
+        # 答不上来 → 正常拉回正题，计数+1
         if new_count >= 2:
             # 连续2轮扯远 → 引导加微信
             reply = self._render_bargain_template("bargain_lead_wechat")
@@ -2966,6 +3463,8 @@ class CustomerServiceEngine:
         Returns:
             (tag, answer) 或 (None, None) 表示退出状态机
         """
+        # 保存当前用户输入，供动作处理器使用（比如answer_detail需要原文做关键词匹配）
+        self._current_bargain_text = text
         import datetime
         print(f"[Bargain V3 Debug] time={datetime.datetime.now().strftime('%H:%M:%S')}")
         print(f"  用户输入: {text}")
@@ -2989,6 +3488,39 @@ class CustomerServiceEngine:
 
         # Step 1+：调用 LLM 决策
         decision = self._llm_bargain_decision(text)
+
+        # Step 2 规则后置校验：补充场景推荐
+        # ponytail: LLM有时会把"客厅用什么合适"这类新场景问题选错动作，
+        # 规则校验：Step2 + 已选材料 + 检测到新场景 + 没说材料/确认/砍价 → 强制走 supplement_scene
+        if self.bargain_step == 2 and self.selected_material and decision:
+            scene_key, scene_name = self._detect_room_type(text)
+            material = self._detect_material_choice(text)
+            is_bargain = self._is_bargain_question(text)
+            confirm_keywords = ["行", "可以", "还行", "好的", "没问题", "嗯", "ok", "OK"]
+            is_confirm = any(kw in text for kw in confirm_keywords)
+            if scene_key and not material and not is_bargain and not is_confirm:
+                # LLM选的不是supplement_scene → 强制纠正
+                if decision.get("action") != "supplement_scene":
+                    # 用推荐矩阵的reason（去掉前缀）
+                    rec_reason = "整体风格统一，施工也方便"
+                    matrix = self.rec_matrix.get("matrix", {})
+                    scene_config = matrix.get(scene_key, {})
+                    if scene_config:
+                        for pref in ["recommend_me", "balanced", "eco_friendly", "cost_effective"]:
+                            if pref in scene_config and scene_config[pref].get("material") == self.selected_material:
+                                raw_reason = scene_config[pref].get("reason", "")
+                                # ponytail: reason里可能带"XX我推荐YY板"前缀，跟补充场景模板的"XX也推荐YY"重复了
+                                # 把前缀去掉，只留核心理由（去掉开头到第一个逗号的内容，如果包含"推荐"字样）
+                                clean_reason = raw_reason
+                                if "推荐" in raw_reason and "，" in raw_reason:
+                                    parts = raw_reason.split("，", 1)
+                                    if len(parts) == 2 and ("推荐" in parts[0] or "首选" in parts[0]):
+                                        clean_reason = parts[1].strip()
+                                rec_reason = clean_reason
+                                break
+                    import json
+                    decision["action"] = "supplement_scene"
+                    decision["detail_param"] = json.dumps({"scene": scene_name, "reason": rec_reason}, ensure_ascii=False)
 
         if decision and decision.get("action") in self.BARGAIN_ACTION_HANDLERS:
             # LLM 决策成功 → 执行对应动作
@@ -3313,7 +3845,28 @@ class CustomerServiceEngine:
             self.llm_fallback_streak = 0
             self.bargain_step = 0
             self.bargain_pullback_count = 0
-            # 从模板组找留资成功话术
+
+            # 手机号格式不对 → 提醒重发
+            if contact_type == "phone_invalid":
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == "lead_phone_invalid":
+                        templates_list = hot_q.get("templates", [])
+                        if templates_list:
+                            answer = self._render(random.choice(templates_list))
+                            return "lead_phone_invalid", answer
+                # 兜底
+                return "lead_phone_invalid", "不好意思，这个手机号好像位数不对呢，您方便再核对下发我一下吗？"
+
+            # 正确手机号 → 专属感谢话术 + 引导需求
+            if contact_type == "phone":
+                for hot_q in self.templates.get("hot_questions", []):
+                    if hot_q.get("category") == "lead_phone_success":
+                        templates_list = hot_q.get("templates", [])
+                        if templates_list:
+                            answer = self._render(random.choice(templates_list))
+                            return "lead_capture/phone", answer
+
+            # 其他留资（微信/地址等）→ 通用留资成功话术
             for hot_q in self.templates.get("hot_questions", []):
                 if hot_q.get("category") == "lead_capture_success":
                     templates_list = hot_q.get("templates", [])
@@ -3528,10 +4081,16 @@ class CustomerServiceEngine:
 
                 # 盲区兜底检测
                 if self.llm_fallback_streak >= 2 or self._is_obscure_question(text):
-                    unknown_pool = self.templates.get("unknown_question", [])
-                    if unknown_pool:
-                        answer = self._render(random.choice(unknown_pool))
-                        tag = "fallback/unknown"
+                    # 先试试知识库检索能不能答
+                    kb_result = self._kb_answer_if_confident(text)
+                    if kb_result:
+                        tag, answer = kb_result
+                        self.llm_fallback_streak = 0
+                    else:
+                        unknown_pool = self.templates.get("unknown_question", [])
+                        if unknown_pool:
+                            answer = self._render(random.choice(unknown_pool))
+                            tag = "fallback/unknown"
 
                 # 正常分类逻辑
                 if not answer:
