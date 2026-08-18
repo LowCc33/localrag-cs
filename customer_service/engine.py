@@ -3197,6 +3197,8 @@ class CustomerServiceEngine:
             return None
         
         answer = top["answer"]
+        # 知识库answer里可能有 {{wechat_id}}/{{shop_location}} 等配置变量，需要渲染
+        answer = self._render(answer)
         # 加引导留资
         if self.bargain_step == 0:
             answer += "\n" + self._get_lead_follow_up()
@@ -3463,7 +3465,7 @@ class CustomerServiceEngine:
             if not detail_answer:
                 kb_results = self._search_knowledge_base(text, top_k=1)
                 if kb_results and kb_results[0]["score"] > 3.0:
-                    detail_answer = kb_results[0]["answer"]
+                    detail_answer = self._render(kb_results[0]["answer"])
         
         # 4) 分类模板渲染兜底
         if not detail_answer and detail_param:
@@ -3531,7 +3533,7 @@ class CustomerServiceEngine:
             if not detail_answer:
                 kb_results = self._search_knowledge_base(text, top_k=1)
                 if kb_results and kb_results[0]["score"] > 4.0:
-                    detail_answer = kb_results[0]["answer"]
+                    detail_answer = self._render(kb_results[0]["answer"])
         
         new_count = self.bargain_pullback_count + 1
         
@@ -3852,7 +3854,7 @@ class CustomerServiceEngine:
         if not fact_answer:
             kb_results = self._search_knowledge_base(text, top_k=1)
             if kb_results and kb_results[0]["score"] > 5.0:
-                fact_answer = kb_results[0]["answer"]
+                fact_answer = self._render(kb_results[0]["answer"])
         
         # 命中事实问题 → 先回答，再追加议价拉回话术，状态不推进
         if fact_answer:
