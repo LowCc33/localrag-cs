@@ -1,0 +1,165 @@
+{
+  "meta": {
+    "shop_id": "weimusi",
+    "version": "1.0",
+    "description": "维慕斯全铝场景推荐矩阵 - 12场景 × 4板材",
+    "levels": {
+      "strong_recommend": "强推",
+      "recommend": "推荐",
+      "can_do": "可以做",
+      "not_recommend": "不推荐"
+    },
+    "materials": {
+      "spc": {"name": "SPC蜂窝板", "price": 480},
+      "honeycomb": {"name": "全铝蜂窝板", "price": 680},
+      "welded": {"name": "全铝焊接大板", "price": 980},
+      "carbon": {"name": "碳脂板", "price": 1180}
+    }
+  },
+  "scenes": {
+    "橱柜": {
+      "scene_key": "kitchen",
+      "spc": "not_recommend",
+      "honeycomb": "can_do",
+      "welded": "strong_recommend",
+      "carbon": "recommend",
+      "main_push": "welded",
+      "reason": "厨房油烟大、潮湿重，焊接大板防水防火不变形，是橱柜的最佳选择。",
+      "mix_match": "柜体用焊接大板（结实防潮）+ 柜门用碳脂板（颜值高），实用又好看，现在很多客户这么搭。"
+    },
+    "浴室柜": {
+      "scene_key": "bathroom",
+      "spc": "not_recommend",
+      "honeycomb": "can_do",
+      "welded": "strong_recommend",
+      "carbon": "recommend",
+      "main_push": "welded",
+      "reason": "卫生间常年潮湿，木质的容易发霉变形，全铝焊接大板完全不怕水，用多少年都没问题。",
+      "mix_match": "柜体焊接大板+柜门碳脂板，防潮又有颜值。"
+    },
+    "阳台柜": {
+      "scene_key": "balcony",
+      "spc": "not_recommend",
+      "honeycomb": "can_do",
+      "welded": "strong_recommend",
+      "carbon": "recommend",
+      "main_push": "welded",
+      "reason": "阳台风吹日晒雨淋，焊接大板防晒防水不变形，放洗衣机、储物柜都合适。",
+      "mix_match": "柜体焊接大板+柜门碳脂板，耐造又好看。"
+    },
+    "地下室/室外储物柜": {
+      "scene_key": "basement",
+      "spc": "not_recommend",
+      "honeycomb": "not_recommend",
+      "welded": "strong_recommend",
+      "carbon": "can_do",
+      "main_push": "welded",
+      "reason": "地下室潮湿、室外风吹雨淋，只有焊接大板能扛住，其他材料用不了几年就坏了。",
+      "mix_match": ""
+    },
+    "电视柜": {
+      "scene_key": "tv_cabinet",
+      "spc": "can_do",
+      "honeycomb": "recommend",
+      "welded": "recommend",
+      "carbon": "strong_recommend",
+      "main_push": "carbon",
+      "reason": "电视柜是客厅颜值担当，碳脂板质感接近实木，温润不冰凉，做出来效果最上档次。",
+      "mix_match": "柜体用焊接大板（结实承重）+ 柜门和见光面用碳脂板（好看），性价比最高的混搭方案。"
+    },
+    "餐边柜/酒柜": {
+      "scene_key": "dining",
+      "spc": "can_do",
+      "honeycomb": "recommend",
+      "welded": "recommend",
+      "carbon": "strong_recommend",
+      "main_push": "carbon",
+      "reason": "餐边柜和酒柜在餐厅显眼位置，碳脂板质感好颜值高，请客吃饭有面子。",
+      "mix_match": "柜体焊接大板+柜门/见光面碳脂板，实用又有档次。"
+    },
+    "书柜/展示柜": {
+      "scene_key": "bookcase",
+      "spc": "can_do",
+      "honeycomb": "recommend",
+      "welded": "recommend",
+      "carbon": "strong_recommend",
+      "main_push": "carbon",
+      "reason": "书柜展示的是品味，碳脂板质感接近实木，放书放摆件都显档次，而且零甲醛对身体好。",
+      "mix_match": "柜体焊接大板（承重好）+ 柜门碳脂板（颜值高），很多客户这么搭。"
+    },
+    "鞋柜": {
+      "scene_key": "shoe_cabinet",
+      "spc": "can_do",
+      "honeycomb": "recommend",
+      "welded": "strong_recommend",
+      "carbon": "recommend",
+      "main_push": "welded",
+      "reason": "鞋柜鞋底带水带泥，潮湿重，焊接大板防水防潮不变形，用得久。",
+      "mix_match": "如果要做格栅、洞洞板这类造型，柜门部分必须用碳脂板。"
+    },
+    "玄关柜": {
+      "scene_key": "entrance",
+      "spc": "not_recommend",
+      "honeycomb": "not_recommend",
+      "welded": "recommend",
+      "carbon": "strong_recommend",
+      "main_push": "carbon",
+      "reason": "玄关是家里的门面，客人进门第一眼就看到，碳脂板颜值高质感好，做造型也好看。",
+      "mix_match": "玄关一般都带格栅、洞洞板、异形这类造型，必须用碳脂板才能做。"
+    },
+    "衣柜/衣帽间": {
+      "scene_key": "wardrobe",
+      "spc": "can_do",
+      "honeycomb": "recommend",
+      "welded": "strong_recommend",
+      "carbon": "strong_recommend",
+      "main_push": "welded",
+      "reason": "衣柜用量最大、天天用，焊接大板结实耐用零甲醛，一步到位最省心。追求品质和颜值就上碳脂板。",
+      "mix_match": "柜体焊接大板+柜门碳脂板，里面结实外面好看，是现在最流行的搭法。"
+    },
+    "儿童房": {
+      "scene_key": "kids_room",
+      "spc": "not_recommend",
+      "honeycomb": "recommend",
+      "welded": "strong_recommend",
+      "carbon": "strong_recommend",
+      "main_push": "welded",
+      "reason": "孩子的房间环保最重要，全铝零甲醛，装完当天就能住。焊接大板结实耐造，孩子怎么折腾都不怕。",
+      "mix_match": "看重颜值和环保的话直接上碳脂板，质感温润不像金属，对孩子更友好。"
+    },
+    "全屋定制": {
+      "scene_key": "whole_house",
+      "spc": "can_do",
+      "honeycomb": "recommend",
+      "welded": "strong_recommend",
+      "carbon": "recommend",
+      "main_push": "welded",
+      "reason": "全屋定制一步到位选焊接大板最省心，全房零甲醛，防水防潮耐用，用二三十年都没问题。",
+      "mix_match": "最推荐混搭方案：厨房、卫生间、阳台这些潮湿地方用焊接大板，客厅、卧室这些颜值区用碳脂板或者柜门用碳脂板，实用又好看，性价比最高。"
+    }
+  },
+  "special_shapes": {
+    "description": "带造型的必须用碳脂板，其他材料做不了",
+    "items": [
+      "洞洞板",
+      "格栅板",
+      "圆弧",
+      "异形",
+      "门窗套",
+      "室内门"
+    ],
+    "answer_template": "这类带造型的（{shape_list}）必须用碳脂板才能做，其他材料做不了。碳脂板是我们最高端的系列，1180一平，质感接近实木，做出来效果非常上档次。"
+  },
+  "welded_simple_shapes": {
+    "description": "焊接大板可以做简单的倒角处理",
+    "items": [
+      "拐角开放柜倒角",
+      "桌面板切角"
+    ],
+    "answer_template": "简单的倒角是可以做的，比如拐角开放柜、桌面板切个角，焊接大板直接加工就行，不用额外加钱。"
+  },
+  "aluminum_profile_arc": {
+    "description": "铝型材圆弧，半径2cm-10cm不等",
+    "answer_template": "圆弧造型我们有铝型材的，半径从2公分到10公分不等，具体看您要多大的弧度。您加我微信{wechat_id}，我发您看看款式和效果图。"
+  }
+}
