@@ -62,6 +62,21 @@ class CustomerServiceEngine:
         self.bargain_pullback_count = 0  # 拉回正题计数器，连续2轮不正面回答就引导加微信
         self.selected_material = None    # 当前选中/推荐的材料key（Step2及以后有值）
         self.llm_fallback_streak = 0     # LLM兜底连续次数（盲区检测用）
+        # —— 已收集用户信息（去重用）——
+        # 只增不改原则：置信度够才存，宁可不存也不乱存；用户明确改口则覆盖
+        self.collected_info = {
+            "name": None,          # 姓名
+            "phone": None,         # 电话
+            "wechat": None,        # 微信
+            "contact": None,       # 通用联系方式（分不清电话还是微信时用）
+            "cabinet_type": None,  # 柜子类型：衣柜/橱柜/全屋等
+            "style_preference": None,  # 风格偏好：现代/北欧/中式等
+            "material": None,      # 材质偏好：颗粒板/多层板/欧松板等
+            "area": None,          # 面积（数字，单位：平方）
+            "budget": None,        # 预算
+            "community": None,     # 小区
+            "city": None,          # 城市
+        }
 
     # ---------- 通用辅助：抽取变量 + 渲染模板 ----------
     def _vars(self):
@@ -78,6 +93,7 @@ class CustomerServiceEngine:
             # —— 店铺基础信息 ——
             "shop_name": self.config["shop_name"],
             "boss_name": self.config["boss_name"],
+            "service_name": self._get_service_name(),
             "years_in_business": self.config["years_in_business"],
             "city": self.config["city"],
             "shop_location": self.config["shop_location"],
@@ -109,11 +125,60 @@ class CustomerServiceEngine:
             "install_days": str(days["install"]),
         }
 
+    def _get_material_selling_point(self, material_key, scene_name=""):
+        """
+        生成材料的推荐理由（安全可控，从配置和矩阵里取，不用LLM）
+        策略：
+        1. 先从推荐矩阵里找该场景+recommend_me的理由（如果材料对得上）
+        2. 找不到就用通用卖点（零甲醛+防潮耐用等）
+        """
+        matrix = self.rec_matrix.get("matrix", {})
+        
+        # 先尝试从推荐矩阵的recommend_me里找
+        for scene_key, scene_data in matrix.items():
+            rec_me = scene_data.get("recommend_me", {})
+            if isinstance(rec_me, dict) and rec_me.get("material") == material_key:
+                reason = rec_me.get("reason", "")
+                if reason:
+                    return reason
+        
+        # 兜底：从材料名和通用卖点拼
+        name_map = self.config.get("_board_name_map", {})
+        mat_name = name_map.get(material_key, "这款材料")
+        
+        # 场景化卖点（厨房/卫生间→防潮，卧室→环保，儿童房→零甲醛）
+        scene = scene_name or ""
+        if any(s in scene for s in ["厨房", "卫生间", "阳台", "厨卫"]):
+            scene_selling = "防水防潮不发霉，用几十年都不会变形"
+        elif any(s in scene for s in ["儿童", "孩子", "宝宝"]):
+            scene_selling = "零甲醛无异味，装完就能住，孩子住着放心"
+        elif any(s in scene for s in ["卧室", "衣柜", "主卧", "次卧"]):
+            scene_selling = "零甲醛环保，天天待着也放心"
+        else:
+            scene_selling = "零甲醛环保，耐用不变形"
+        
+        return f"{mat_name}{scene_selling}"
+
     def _render_lead_hook(self):
         """渲染单个留资钩子（钩子模板里也有 {{wechat_id}} 需要先渲染）"""
         hook_template = random.choice(self.config.get("lead_hooks", [""]))
         # 钩子模板里只有 wechat_id 变量，直接替换
         return hook_template.replace("{{wechat_id}}", self.config.get("wechat_id", ""))
+
+    def _get_service_name(self):
+        """
+        获取客服称呼
+        - 优先用配置里的 customer_service_name 字段
+        - 没有就用"小+老板名第一个字"（如老板叫宋姐→小宋）
+        - 都没有就返回"客服"
+        """
+        name = self.config.get("customer_service_name", "")
+        if name:
+            return name
+        boss_name = self.config.get("boss_name", "")
+        if boss_name:
+            return f"小{boss_name[0]}"
+        return "客服"
 
     # ---------- 商家私有模板覆盖 ----------
     def _apply_shop_templates(self, shop_id: str):
@@ -145,6 +210,13 @@ class CustomerServiceEngine:
             "aluminum_vs_wood_templates": "aluminum_vs_wood",
             "eco_zero_formaldehyde_templates": "eco_level",
             "shop_info_templates": "shop_info",
+            "price_probe_templates": "bargain_probe",
+            "kitchen_recommend_templates": "material_recommend_kitchen",
+            "bathroom_recommend_templates": "material_recommend_bathroom",
+            "bedroom_recommend_templates": "material_recommend_bedroom",
+            "kids_room_recommend_templates": "material_recommend_kids_room",
+            "shoe_cabinet_recommend_templates": "material_recommend_shoe_cabinet",
+            "tatami_recommend_templates": "material_recommend_tatami",
         }
 
         # 收集要覆盖到 hot_questions 的条目
@@ -729,8 +801,13 @@ class CustomerServiceEngine:
         # 纯问价 → 先报价格区间（step1）
         # 砍价/要优惠 → 先摸底反问（step3），不直接报价
         if self.bargain_step == 0:
-            # 砍价意图优先 → 直接摸底（不管有没有说材料/面积，先问清楚需求再报价）
+            # 砍价意图优先 → 摸底（但已有面积就跳过摸底，直接报价）
             if is_bargain:
+                if self._has_collected("area"):
+                    # 已有面积 → 跳过摸底，直接报区间（走step1流程）
+                    self.bargain_step = 1
+                    self.bargain_pullback_count = 0
+                    return "price_range", self._render_bargain_template("bargain_price_range")
                 self.bargain_step = 3
                 self.bargain_pullback_count = 0
                 return "probe", self._render_bargain_template("bargain_probe")
@@ -882,6 +959,16 @@ class CustomerServiceEngine:
 
         # ========== Step 3：等用户报面积/数量 ==========
         if self.bargain_step == 3:
+            # 安全兜底：如果 collected_info 里已有面积但 size_val 没检测出来，直接用
+            if not size_val and self._has_collected("area"):
+                area = self.collected_info["area"]
+                if area >= 30:
+                    size_val = "large"
+                elif area >= 6:
+                    size_val = "medium"
+                else:
+                    size_val = "small"
+                order_desc = f"大约{area}平"
             # 有面积/数量线索 → 给优惠价，进step4
             if size_val:
                 self.bargain_step = 4
@@ -937,8 +1024,18 @@ class CustomerServiceEngine:
     def _append_lead_hook(self, answer):
         """
         在分档报价结尾追加留资钩子 + 引导话题（只在第一次报价时调用）
-        钩子随机选一条，引导话题固定
+        去重逻辑：已收集到微信/电话 → 换邀约话术，不重复索要联系方式
         """
+        # 已有微信 → 换邀约话术
+        if self._has_collected("wechat"):
+            hook = "您加我了是吧？稍后我通过一下，详细报价单和案例我发您微信上。"
+            follow_up = "有什么想了解的随时说哈，板材、工艺、安装啥的都行。"
+            return answer + "\n\n" + hook + "\n" + follow_up
+        # 已有电话 → 换邀约话术
+        if self._has_collected("phone"):
+            hook = "您的电话我记下了，稍后我让设计师跟您联系，免费给您出个方案和报价。"
+            follow_up = "有什么想了解的随时说哈，板材、工艺、安装啥的都行。"
+            return answer + "\n\n" + hook + "\n" + follow_up
         lead_hooks = [
             "对了，您加我微信{{wechat_id}}吧，我给您发份详细报价单，您回去也好对比对比。",
             "方便加个微信不{{wechat_id}}？后面有什么变动我直接跟您说。",
@@ -952,6 +1049,7 @@ class CustomerServiceEngine:
         """
         渲染拉回正题话术（根据当前step选对应话术）
         bargain_pullback 模板组有4条，分别对应 step 1-4
+        去重逻辑：如果该step对应的询问字段已经收集到，就换一个推进方向
         """
         for hot_q in self.templates.get("hot_questions", []):
             if hot_q.get("category") == "bargain_pullback":
@@ -959,6 +1057,16 @@ class CustomerServiceEngine:
                 if templates_list:
                     # step 1 对应索引0，step 2 对应索引1...
                     idx = max(0, min(step - 1, len(templates_list) - 1))
+                    # —— 去重判断 ——
+                    # step=1（问材料/偏好）：已有材质偏好 → 用下一条（问面积/报价）
+                    if step == 1 and self._has_collected("material"):
+                        idx = min(idx + 1, len(templates_list) - 1)
+                    # step=2（问报价/确认）：已有面积 → 用下一条（问优惠/量房）
+                    elif step == 2 and self._has_collected("area"):
+                        idx = min(idx + 1, len(templates_list) - 1)
+                    # step=3（问面积）：已有面积 → 用上一条（确认配置）
+                    elif step == 3 and self._has_collected("area"):
+                        idx = max(0, idx - 1)
                     return self._render(templates_list[idx])
         # 兜底
         return "咱先把这事定下来？"
@@ -1815,6 +1923,182 @@ class CustomerServiceEngine:
 
         return None
 
+    # ---------- 信息收集与去重 ----------
+    def _extract_collected_info(self, text):
+        """
+        从用户消息中提取可收集的信息，存入 collected_info
+        策略：正则优先（手机号、面积等），关键词兜底
+        原则：只增不改，置信度不够宁可不存；用户明确改口则覆盖
+
+        Args:
+            text: 用户当前输入文本
+        Returns:
+            dict: 本轮新提取到的字段 {field: value}，没提取到返回空dict
+        """
+        import re
+        new_info = {}
+
+        # 1) 手机号（最高置信度，正则精准匹配）
+        phone_match = re.search(r'(?<!\d)1[3-9]\d{9}(?!\d)', text)
+        if phone_match:
+            new_info["phone"] = phone_match.group(0)
+
+        # 2) 面积（带单位的数字）
+        # 2.1 模糊范围：7-8平 → 取平均值
+        fuzzy_area = re.search(
+            r'(\d+)(?:\s+|[-~到至])(\d+)\s*(?:个)?\s*(?:平方|平米|平|㎡)', text
+        )
+        if fuzzy_area:
+            low = float(fuzzy_area.group(1))
+            high = float(fuzzy_area.group(2))
+            new_info["area"] = round((low + high) / 2, 1)
+        else:
+            # 2.2 精确数字 + 单位
+            area_match = re.search(
+                r'(\d+(?:\.\d+)?)\s*(?:个)?\s*(?:平方|平米|平|㎡)', text
+            )
+            if area_match:
+                new_info["area"] = float(area_match.group(1))
+
+        # 3) 柜子类型（关键词匹配）
+        cabinet_keywords = {
+            "全屋": ["全屋定制", "整屋", "全套", "家里全部"],
+            "衣柜": ["衣柜", "衣橱", "衣帽间"],
+            "橱柜": ["橱柜", "厨柜", "厨房柜", "厨房柜子"],
+            "鞋柜": ["鞋柜"],
+            "酒柜": ["酒柜"],
+            "书柜": ["书柜"],
+            "电视柜": ["电视柜"],
+        }
+        for cab_type, keywords in cabinet_keywords.items():
+            if any(kw in text for kw in keywords):
+                new_info["cabinet_type"] = cab_type
+                break
+
+        # 4) 风格偏好
+        style_keywords = {
+            "现代简约": ["现代简约", "简约", "现代风", "极简"],
+            "北欧": ["北欧", "北欧风", "ins风"],
+            "新中式": ["新中式", "中式", "中式风"],
+            "轻奢": ["轻奢", "奢华"],
+            "美式": ["美式", "美式风格"],
+            "欧式": ["欧式", "欧式风格"],
+            "日式": ["日式", "原木风", "日系"],
+        }
+        for style, keywords in style_keywords.items():
+            if any(kw in text for kw in keywords):
+                new_info["style_preference"] = style
+                break
+
+        # 5) 材质偏好
+        material_keywords = {
+            "颗粒板": ["颗粒板", "刨花板"],
+            "多层板": ["多层板", "胶合板", "多层实木板"],
+            "欧松板": ["欧松板", "OSB", "osb"],
+            "密度板": ["密度板", "中纤板", "MDF"],
+            "实木板": ["实木板", "纯实木"],
+            "生态板": ["生态板", "免漆板"],
+        }
+        for mat, keywords in material_keywords.items():
+            if any(kw in text for kw in keywords):
+                new_info["material"] = mat
+                break
+
+        # 6) 预算（带"万"/"元"单位）
+        budget_match = re.search(
+            r'(\d+(?:\.\d+)?)\s*万(?:元)?(?:左右|上下|以内|预算|块钱)?', text
+        )
+        if budget_match:
+            new_info["budget"] = budget_match.group(1) + "万"
+        else:
+            budget_match2 = re.search(
+                r'预算(?:大概|大约|是)?\s*[：:]?\s*(\d+(?:\.\d+)?)\s*万', text
+            )
+            if budget_match2:
+                new_info["budget"] = budget_match2.group(1) + "万"
+
+        # 7) 姓名（置信度较低，只在明确语境下提取）
+        # 只匹配 "我叫XX" "我姓XX" "叫我XX" 这种明确句式
+        name_patterns = [
+            r'我叫([\u4e00-\u9fa5]{2,4})',
+            r'我姓([\u4e00-\u9fa5]{1,2})',
+            r'叫我([\u4e00-\u9fa5]{2,4})',
+            r'我是([\u4e00-\u9fa5]{2,4})',
+        ]
+        for pat in name_patterns:
+            name_match = re.search(pat, text)
+            if name_match:
+                new_info["name"] = name_match.group(1)
+                break
+
+        # 8) 微信（明确留微信的语境）
+        wechat_patterns = [
+            r'我微信[是：:]*([a-zA-Z0-9_-]{5,20})',
+            r'微信号[是：:]*([a-zA-Z0-9_-]{5,20})',
+            r'加我微信([a-zA-Z0-9_-]{5,20})',
+        ]
+        for pat in wechat_patterns:
+            wx_match = re.search(pat, text)
+            if wx_match:
+                new_info["wechat"] = wx_match.group(1)
+                break
+
+        # 9) 小区（XX小区/XX花园/XX苑/XX府 等）
+        # 置信度中等，匹配常见小区后缀
+        community_suffixes = ["小区", "花园", "苑", "府", "城", "园", "里", "邨", "湾", "郡"]
+        for suffix in community_suffixes:
+            if suffix in text:
+                # 从后缀往前找最近的2-8个汉字/字母/数字
+                idx = text.index(suffix)
+                # 往前截取，从第一个非汉字字母数字的地方断开
+                start = idx
+                while start > 0 and (text[start-1].isalnum() or '\u4e00' <= text[start-1] <= '\u9fa5'):
+                    start -= 1
+                comm_name = text[start:idx + len(suffix)]
+                # 过滤掉明显的前缀词
+                bad_prefixes = ["我家在", "你家在", "他家在", "在", "是", "有", "去", "到",
+                               "我", "你", "他", "这个", "那个", "你们", "我们", "你家", "我家", "他家",
+                               "叫", "叫什么", "什么", "哪个"]
+                for prefix in bad_prefixes:
+                    if comm_name.startswith(prefix):
+                        comm_name = comm_name[len(prefix):]
+                        break
+                if len(comm_name) >= 3:
+                    new_info["community"] = comm_name
+                break
+
+        # 10) 城市（匹配常见城市名，只匹配明确提到的）
+        cities = ["北京", "上海", "广州", "深圳", "杭州", "南京", "成都", "武汉",
+                  "西安", "重庆", "天津", "苏州", "长沙", "郑州", "青岛", "大连",
+                  "宁波", "厦门", "福州", "济南", "合肥", "南昌", "南宁", "昆明",
+                  "贵阳", "兰州", "乌鲁木齐", "哈尔滨", "沈阳", "长春", "石家庄",
+                  "太原", "呼和浩特", "海口", "三亚", "无锡", "常州", "佛山",
+                  "东莞", "珠海", "温州", "泉州", "烟台", "潍坊", "徐州", "南通"]
+        for city in cities:
+            if city in text:
+                new_info["city"] = city
+                break
+
+        # —— 更新 collected_info（只增不改：有新值才存，用户改口新值覆盖旧值）——
+        updated = {}
+        for field, value in new_info.items():
+            if field in self.collected_info:
+                # 旧值为空 或 新值不同（用户改口）→ 更新
+                if self.collected_info[field] != value:
+                    self.collected_info[field] = value
+                    updated[field] = value
+        return updated
+
+    def _has_collected(self, field):
+        """检查某个字段是否已经收集到了
+
+        Args:
+            field: 字段名
+        Returns:
+            bool: 已收集返回True
+        """
+        return self.collected_info.get(field) is not None
+
     def _is_bargain_question(self, text):
         """判断是不是砍价/要优惠的问题（只有明确砍价信号才算）
         注意：纯问价（多少钱、价格、报价）不算，归 _is_price_question 管
@@ -2423,6 +2707,10 @@ class CustomerServiceEngine:
                         self.history = self.history[-3:]
                         return "lead_capture", answer
 
+        # 0.3) 信息提取：从用户消息中抽取可收集字段，存入 collected_info
+        #      （在意图路由之前执行，确保后续所有询问类话术都能感知到已收集的信息）
+        self._extract_collected_info(text)
+
         # 0.5) 全局简单问题直答层（LLM分类之前，能直接答的先答）
         # 处理：确认类追问、工艺类追问、材料细节类追问
         simple_result = self._handle_simple_question(text)
@@ -2690,6 +2978,21 @@ class CustomerServiceEngine:
         # ponytail: 议价状态内一律交给 v3 决策层，simple_question 不介入
         if self.bargain_step > 0:
             return None
+
+        # ===== 第0优先级：身份/名字类问题 =====
+        name_keywords = ["你叫什么", "你叫啥", "你是谁", "你叫什么名字", "你叫什么名字呀", "怎么称呼你", "怎么称呼", "你贵姓"]
+        if any(kw in text for kw in name_keywords):
+            service_name = self._get_service_name()
+            name_answers = [
+                "我叫" + service_name + "，是{{shop_name}}的客服～有什么可以帮您的吗？",
+                "我是" + service_name + "呀，专门负责咱们{{shop_name}}的在线咨询～您是想了解定制吗？",
+                "我叫" + service_name + "，您有任何关于柜子定制的问题都可以问我哦！",
+            ]
+            import random
+            answer = self._render(random.choice(name_answers))
+            follow_up = "\n" + self._get_lead_follow_up()
+            return "simple/service_name", answer + follow_up
+
         # ===== 第1优先级：确认类追问 =====
         if self._is_confirmation_question(text):
             item = self._extract_confirm_item(text)
@@ -3061,36 +3364,32 @@ class CustomerServiceEngine:
     def _action_recommend_material(self, detail_param):
         """
         动作：推荐材料并报实价
-        detail_param：JSON字符串 {"material": "材料key", "reason": "推荐理由"}
-                    或纯字符串（当理由用，材料取主推）
-        设计：LLM根据用户偏好选材料（便宜→颗粒板，环保→多层板等），不再写死main_material
+        detail_param：LLM返回的信息（可能包含scene/preference等）
+        核心原则：材料和推荐理由必须从商家的推荐矩阵里取，不能用LLM自己编的
+                 （LLM不知道商家卖什么材料，会乱推荐木质板）
         状态更新：bargain_step=2, selected_material=推荐材料
         """
-        import json
-
-        # 默认值：主推材料 + 默认理由
-        mat_key = self.config.get("main_material", "multi_layer_board")
-        recommend_reason = "性价比很高，家用完全够"
-
-        # 解析 detail_param
-        if detail_param:
-            try:
-                data = json.loads(detail_param)
-                # LLM指定了材料 → 用LLM选的（必须在配置的材料列表里）
-                if data.get("material"):
-                    suggested = data["material"]
-                    # 校验材料是否在配置中（_boards 是 list，每个元素有key字段）
-                    boards = self.config.get("_boards", [])
-                    valid_keys = [b["key"] for b in boards if isinstance(b, dict) and "key" in b]
-                    if suggested in valid_keys:
-                        mat_key = suggested
-                # LLM写了理由
-                if data.get("reason"):
-                    recommend_reason = data["reason"]
-            except Exception:
-                # 不是JSON，整个当理由用
-                recommend_reason = detail_param.strip() or recommend_reason
-
+        # 从推荐矩阵里查，优先用当前用户输入做场景+偏好检测
+        text = getattr(self, "_current_bargain_text", "")
+        
+        rec_result = None
+        if text:
+            rec_result = self._get_recommendation(text)
+        
+        if rec_result:
+            mat_key = rec_result["material"]
+            recommend_reason = rec_result["reason"]
+        else:
+            # 检测不出来 → 用主推材料 + 默认推荐理由
+            mat_key = self.config.get("main_material")
+            # 从矩阵的default场景里找recommend_me的理由
+            matrix = self.rec_matrix.get("matrix", {})
+            default_rec = matrix.get("default", {}).get("recommend_me", {})
+            if isinstance(default_rec, dict):
+                recommend_reason = default_rec.get("reason", "性价比高，家用合适")
+            else:
+                recommend_reason = "性价比高，家用合适"
+        
         extra_vars = {"recommend_reason": recommend_reason}
         reply = self._render_bargain_template(
             "bargain_recommend_material",
@@ -3263,16 +3562,47 @@ class CustomerServiceEngine:
     def _action_lead_wechat(self, detail_param):
         """
         动作：引导加微信
+        去重逻辑：已收集到微信/电话 → 换确认/邀约话术，不重复索要
         状态更新：bargain_step 不变
         """
+        # 已有微信 → 不重复要，换邀约话术
+        if self._has_collected("wechat"):
+            reply = (
+                "好的，我记下您的微信了~ 稍后我加您，详细报价单和案例我发您微信上，"
+                "您有什么问题随时问我哈。"
+            )
+            return "bargain/lead_wechat_skip", reply, {}
+        # 已有电话 → 不重复要，换邀约话术
+        if self._has_collected("phone"):
+            reply = (
+                "好的，您的电话我记下了~ 稍后我让设计师跟您联系，"
+                "免费给您出个方案和报价，您看方便什么时候安排量房？"
+            )
+            return "bargain/lead_wechat_skip", reply, {}
         reply = self._render_bargain_template("bargain_lead_wechat")
         return "bargain/lead_wechat", reply, {}
 
     def _action_advance_from_step2(self, detail_param):
         """
         动作：从Step2推进到Step3（摸底）
-        状态更新：bargain_step=3
+        去重逻辑：已收集到面积 → 跳过摸底，直接给优惠报价（Step4）
+        状态更新：bargain_step=3 或 4
         """
+        # 已有面积 → 跳过摸底，直接给优惠（跳到step4）
+        if self._has_collected("area"):
+            size_val = "medium"
+            area = self.collected_info["area"]
+            if area >= 30:
+                size_val = "large"
+            elif area < 6:
+                size_val = "small"
+            material = self.selected_material or ""
+            order_desc = f"您家大约{area}平"
+            reply = self._render_bargain_template(
+                f"bargain_{size_val}", material=material, order_desc=order_desc
+            )
+            state_updates = {"bargain_step": 4, "bargain_pullback_count": 0}
+            return "bargain/skip_probe", reply, state_updates
         reply = self._render_bargain_template("bargain_probe")
         state_updates = {"bargain_step": 3, "bargain_pullback_count": 0}
         return "bargain/advance_from_step2", reply, state_updates
@@ -3344,11 +3674,10 @@ class CustomerServiceEngine:
         动作：补充场景推荐（用户在Step2补充新房间/新场景）
         处理逻辑：
         1. 新场景也推荐同一种材料（保持推荐一致性）
-        2. 说明为什么这种材料也适合新场景（LLM动态生成理由）
+        2. 说明为什么这种材料也适合新场景（从推荐矩阵/材料卖点里取，不用LLM生成，避免乱推荐）
         3. 重申价格+配置
         4. 继续引导摸底面积
-        detail_param：JSON字符串，包含 {scene:"场景名（如卧室/厨房/衣柜）", reason:"推荐理由"}
-                    或直接传理由字符串（兜底）
+        detail_param：JSON字符串，包含 {scene:"场景名", ...}
         状态更新：bargain_step 不变（仍为2），bargain_pullback_count 重置
         """
         import json
@@ -3359,27 +3688,35 @@ class CustomerServiceEngine:
 
         # 默认值
         scene_name = "这个空间"
-        recommend_reason = "用一样的材料整体风格统一，也方便施工"
-
-        # 尝试解析 detail_param（优先解析为JSON）
+        
+        # 尝试解析detail_param里的场景名
         if detail_param:
             try:
                 data = json.loads(detail_param)
                 if data.get("scene"):
                     scene_name = data["scene"]
-                if data.get("reason"):
-                    recommend_reason = data["reason"]
             except Exception:
-                # 不是JSON，把整个detail_param当理由用
-                recommend_reason = detail_param.strip() or recommend_reason
-
+                pass
+        
+        # 如果LLM给的场景名太模糊，从用户输入里重新检测
+        text = getattr(self, "_current_bargain_text", "")
+        if text and scene_name in ["这个空间", "", "厨房"]:
+            detected_key, detected_name = self._detect_room_type(text)
+            if detected_name:
+                scene_name = detected_name
+        
+        # 推荐理由：从材料卖点里拼，安全可控，不会出现LLM乱编的木质词汇
+        # 用材料的环保/卖点作为核心理由
+        material = self.selected_material
+        reason = self._get_material_selling_point(material, scene_name)
+        
         extra_vars = {
-            "recommend_reason": recommend_reason,
+            "recommend_reason": reason,
             "scene_name": scene_name,
         }
         reply = self._render_bargain_template(
             "bargain_supplement_scene",
-            material=self.selected_material,
+            material=material,
             extra_vars=extra_vars
         )
 
@@ -3475,7 +3812,13 @@ class CustomerServiceEngine:
         # Step 0 初次进入：直接报价格区间（不需要LLM决策，确定性最高）
         if self.bargain_step == 0:
             if llm_category in ("bargain", "complain_price"):
-                # 砍价/嫌贵 → 先摸底
+                # 砍价/嫌贵 → 先摸底（但如果已经知道面积，就直接报价不摸底）
+                if self._has_collected("area"):
+                    # 已有面积 → 跳过摸底，直接报区间+提面积
+                    self.bargain_step = 1
+                    self.bargain_pullback_count = 0
+                    reply = self._render_bargain_template("bargain_price_range")
+                    return "bargain/price_range", reply
                 self.bargain_step = 3
                 self.bargain_pullback_count = 0
                 reply = self._render_bargain_template("bargain_probe")
@@ -3486,7 +3829,38 @@ class CustomerServiceEngine:
             reply = self._render_bargain_template("bargain_price_range")
             return "bargain/price_range", reply
 
-        # Step 1+：调用 LLM 决策
+        # Step 1+：先做事实问题预检查，能直接答的就不麻烦LLM了
+        # 适用：店铺信息、环保等级、工艺细节、材料对比、计价方式等事实类问题
+        # 好处：减少LLM调用，提高响应速度和稳定性，避免LLM选错动作
+        fact_answer = None
+        
+        # 1) 关键词匹配hot_questions（已经自动跳过bargain_only和工艺类）
+        hot_result = self._match_hot_question(text)
+        if hot_result:
+            hot_tag, hot_answer = hot_result
+            # 排除材料推荐类问题（material_recommend_xxx），这些应该走议价推荐矩阵
+            # 否则会命中公用模板里的木质推荐话术（多层板/颗粒板等）
+            if "material_recommend" not in hot_tag:
+                fact_answer = hot_answer
+        # 2) 工艺匹配
+        if not fact_answer:
+            process_match = self._match_process_by_keywords(text)
+            if process_match:
+                pkey, pname, can_do, atpl = process_match
+                fact_answer = self._get_process_answer(pkey, pname, can_do, atpl)
+        # 3) 知识库检索（高分才用，阈值设高一点避免误伤议价流程）
+        if not fact_answer:
+            kb_results = self._search_knowledge_base(text, top_k=1)
+            if kb_results and kb_results[0]["score"] > 5.0:
+                fact_answer = kb_results[0]["answer"]
+        
+        # 命中事实问题 → 先回答，再追加议价拉回话术，状态不推进
+        if fact_answer:
+            follow_up = self._get_bargain_follow_up()
+            full_answer = fact_answer + "\n" + follow_up
+            return "bargain/answer_detail", full_answer
+
+        # 然后才调用 LLM 决策
         decision = self._llm_bargain_decision(text)
 
         # Step 2 规则后置校验：补充场景推荐
