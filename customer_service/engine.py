@@ -15,6 +15,7 @@ v2.0 新增：
 
 import os
 import random
+import json
 import requests
 import yaml
 from jinja2 import Template
@@ -50,9 +51,11 @@ class CustomerServiceEngine:
         with open(os.path.join(BASE_DIR, "recommendation_matrix.yaml"), encoding="utf-8") as f:
             self.rec_matrix = yaml.safe_load(f) or {}
         # 3) 商家私有模板覆盖（如果有 shop_id 且对应文件存在）
+        self.private_rec_matrix = None  # 先初始化，确保属性一定存在
         if shop_id:
             self._apply_shop_templates(shop_id)
             self._apply_shop_rec_matrix(shop_id)
+            self._load_private_rec_matrix(shop_id)
         # 4) 根据 shop_id 加载对应商家配置（None 则用默认配置）
         self.config = load_shop_config(shop_id)
         self.history = []                # 上下文记忆，最多留 3 轮
@@ -354,6 +357,24 @@ class CustomerServiceEngine:
 
         print(f"[推荐矩阵] 已应用商家 {shop_id} 私有推荐矩阵")
 
+    def _load_private_rec_matrix(self, shop_id: str):
+        """
+        加载商家私有全场景推荐矩阵（全铝风格，12场景×4板材结构）
+        文件：shops/{shop_id}_recommend_matrix.json
+        加载成功则存到 self.private_rec_matrix，失败静默跳过
+        """
+        matrix_path = os.path.join(BASE_DIR, "shops", f"{shop_id}_recommend_matrix.json")
+        if not os.path.exists(matrix_path):
+            self.private_rec_matrix = None
+            return
+        try:
+            with open(matrix_path, encoding="utf-8") as f:
+                self.private_rec_matrix = json.load(f)
+            print(f"[私有推荐矩阵] 已加载商家 {shop_id} 私有推荐矩阵")
+        except Exception as e:
+            print(f"[私有推荐矩阵] 商家{shop_id}矩阵加载失败: {e}")
+            self.private_rec_matrix = None
+
     def _render(self, raw):
         """用 jinja2 渲染单条模板字符串"""
         return Template(raw).render(**self._vars())
@@ -408,6 +429,46 @@ class CustomerServiceEngine:
         return None
 
     # ---------- 2) 工艺能力判断 ----------
+    def _match_private_special_shape(self, text):
+        """
+        私有矩阵特殊造型检测（洞洞板/格栅/圆弧/异形/倒角 等）
+        命中后直接返回对应话术，优先级高于普通工艺判断
+        返回：(tag, answer) 或 None
+        """
+        if not self.private_rec_matrix:
+            return None
+
+        # 1. 特殊造型（必须碳脂板）：优先级最高
+        special = self.private_rec_matrix.get("special_shapes", {})
+        special_items = special.get("items", [])
+        special_hits = [item for item in special_items if item in text]
+        if special_hits:
+            shape_list = "、".join(special_hits)
+            tpl = special.get("answer_template", "")
+            answer = tpl.replace("{shape_list}", shape_list)
+            answer = self._render(answer)  # 渲染 {{wechat_id}} 等变量
+            return "process/special_shape", answer
+
+        # 2. 焊接大板简单造型（倒角/切角）
+        welded = self.private_rec_matrix.get("welded_simple_shapes", {})
+        welded_items = welded.get("items", [])
+        # 用关键词匹配：倒角、切角
+        welded_keywords = ["倒角", "切角"]
+        if any(kw in text for kw in welded_keywords):
+            tpl = welded.get("answer_template", "")
+            answer = self._render(tpl)
+            return "process/welded_simple_shape", answer
+
+        # 3. 铝型材圆弧
+        arc = self.private_rec_matrix.get("aluminum_profile_arc", {})
+        arc_keywords = ["圆弧", "圆角", "弧度"]
+        if any(kw in text for kw in arc_keywords):
+            tpl = arc.get("answer_template", "")
+            answer = self._render(tpl)
+            return "process/aluminum_arc", answer
+
+        return None
+
     def _get_merged_process_templates(self):
         """
         获取合并后的工艺模板列表（系统内置 + 商家自定义）
@@ -453,6 +514,11 @@ class CustomerServiceEngine:
         不能做 → 渲染 no_templates（替代方案话术）
         匹配不上 → 返回 None，走正常流程
         """
+        # 先查私有矩阵特殊造型（优先级最高）
+        private_shape = self._match_private_special_shape(text)
+        if private_shape:
+            return private_shape
+
         best_match = None
         best_count = 0
         best_len = 0
@@ -849,20 +915,34 @@ class CustomerServiceEngine:
                 # 推进到 step 2
                 self.bargain_step = 2
                 self.bargain_pullback_count = 0
-                # 渲染推荐话术（变量化模板）+ 场景化跟进提问
-                recommend_text = self._render_bargain_template(
-                    "bargain_recommendation_v2",
-                    material=mat_key,
-                    extra_vars={
-                        "recommend_reason": reason,
-                        "recommended_material_name": rec_result["material_name"],
-                        "recommended_material_price": str(rec_result["material_price"]),
-                        "board_brand": self.config.get("board_brand", ""),
-                        "eco_level": self.config.get("eco_level", ""),
-                        "hardware_brand": self.config.get("hardware_brand", ""),
-                        "edge_banding": self.config.get("edge_band", ""),
-                    }
-                )
+
+                # 私有推荐矩阵 → 用私有格式组装话术
+                if rec_result.get("is_private"):
+                    mat_name = rec_result["material_name"]
+                    mat_price = rec_result["material_price"]
+                    mix_match = rec_result.get("mix_match", "")
+                    recommend_parts = [
+                        f"根据您的情况，我推荐用【{mat_name}】，{mat_price}一平。",
+                        reason,
+                    ]
+                    if mix_match:
+                        recommend_parts.append(mix_match)
+                    recommend_text = "\n".join(recommend_parts)
+                else:
+                    # 渲染推荐话术（变量化模板）+ 场景化跟进提问
+                    recommend_text = self._render_bargain_template(
+                        "bargain_recommendation_v2",
+                        material=mat_key,
+                        extra_vars={
+                            "recommend_reason": reason,
+                            "recommended_material_name": rec_result["material_name"],
+                            "recommended_material_price": str(rec_result["material_price"]),
+                            "board_brand": self.config.get("board_brand", ""),
+                            "eco_level": self.config.get("eco_level", ""),
+                            "hardware_brand": self.config.get("hardware_brand", ""),
+                            "edge_banding": self.config.get("edge_band", ""),
+                        }
+                    )
                 # 拼接场景化跟进提问
                 full_answer = recommend_text + "\n" + follow_up
                 return f"recommend/{scene_key}", full_answer
@@ -1463,6 +1543,12 @@ class CustomerServiceEngine:
             "follow_up": "您衣柜大概做多大？",   # 场景化跟进提问
         }
         """
+        # 有私有推荐矩阵 → 先走私有矩阵逻辑
+        if self.private_rec_matrix:
+            private_rec = self._get_private_recommendation(text)
+            if private_rec:
+                return private_rec
+
         scene_key, scene_name = self._detect_room_type(text)
         preference = self._detect_preference_type(text)
 
@@ -1511,6 +1597,160 @@ class CustomerServiceEngine:
             "follow_up": follow_up,
         }
 
+    # ---------- 私有推荐矩阵（全铝风格）----------
+    # 引擎场景key → 私有矩阵场景key 的映射
+    PRIVATE_SCENE_MAP = {
+        "kitchen": "kitchen",
+        "bathroom": "bathroom",
+        "balcony": "balcony",
+        "shoe_cabinet": "shoe_cabinet",
+        "kids_room": "kids_room",
+        "whole_house": "whole_house",
+        "bedroom_wardrobe": "wardrobe",
+        "living_room": "tv_cabinet",  # 客厅主要命中电视柜
+        "tatami": None,  # 私有矩阵没有榻榻米，走默认
+    }
+
+    def _map_to_private_scene(self, scene_key):
+        """把引擎场景key映射到私有矩阵场景key，映射不到返回None"""
+        return self.PRIVATE_SCENE_MAP.get(scene_key)
+
+    def _get_private_scene_config(self, scene_key):
+        """从私有矩阵里拿到指定场景的配置，拿不到返回None"""
+        if not self.private_rec_matrix:
+            return None
+        private_key = self._map_to_private_scene(scene_key)
+        if not private_key:
+            return None
+        scenes = self.private_rec_matrix.get("scenes", {})
+        for scene_name, cfg in scenes.items():
+            if cfg.get("scene_key") == private_key:
+                return cfg, scene_name
+        return None, None
+
+    def _get_private_material_info(self, mat_key):
+        """从私有矩阵meta里拿材料名和价格"""
+        if not self.private_rec_matrix:
+            return None, None
+        mats = self.private_rec_matrix.get("meta", {}).get("materials", {})
+        info = mats.get(mat_key)
+        if not info:
+            return None, None
+        return info.get("name"), info.get("price")
+
+    def _pick_private_material(self, scene_cfg, preference):
+        """
+        根据场景配置 + 用户偏好，从私有矩阵里选主推板材
+        返回：(mat_key, reason)
+        偏好映射：
+        - cost_effective → can_do/recommend 里最便宜的
+        - eco_friendly / balanced → main_push
+        - quality → carbon（碳脂板，前提是 recommend 或 strong_recommend）
+        - recommend_me → main_push
+        """
+        if not scene_cfg:
+            return None, ""
+
+        main_push = scene_cfg.get("main_push")
+        reason = scene_cfg.get("reason", "")
+
+        # 品质/颜值偏好 → 优先碳脂板（如果推荐级以上）
+        if preference == "quality":
+            carbon_level = scene_cfg.get("carbon", "not_recommend")
+            if carbon_level in ("strong_recommend", "recommend"):
+                return "carbon", reason
+            # 碳脂板不推荐的话，退回主推
+            if main_push:
+                return main_push, reason
+            return None, ""
+
+        # 性价比偏好 → 找 recommend/strong_recommend 级别里最便宜的（can_do只是能做，不主动推荐）
+        if preference == "cost_effective":
+            mats = self.private_rec_matrix.get("meta", {}).get("materials", {})
+            candidates = []
+            for mat_key in ["spc", "honeycomb", "welded", "carbon"]:
+                level = scene_cfg.get(mat_key, "not_recommend")
+                if level in ("recommend", "strong_recommend"):
+                    price = mats.get(mat_key, {}).get("price", 99999)
+                    candidates.append((price, mat_key))
+            if candidates:
+                candidates.sort()
+                return candidates[0][1], reason
+            # 兜底：如果没有recommend级别的，再看can_do
+            for mat_key in ["spc", "honeycomb", "welded", "carbon"]:
+                level = scene_cfg.get(mat_key, "not_recommend")
+                if level == "can_do":
+                    price = mats.get(mat_key, {}).get("price", 99999)
+                    candidates.append((price, mat_key))
+            if candidates:
+                candidates.sort()
+                return candidates[0][1], reason
+            # 再兜底用主推
+            if main_push:
+                return main_push, reason
+            return None, ""
+
+        # 环保/耐用/推荐我/平衡/没偏好 → 都用主推款
+        if main_push:
+            return main_push, reason
+        return None, ""
+
+    def _get_private_recommendation(self, text):
+        """
+        私有矩阵单场景推荐入口
+        返回格式与 _get_recommendation 保持一致，方便上层调用
+        """
+        if not self.private_rec_matrix:
+            return None
+
+        scene_key, scene_name = self._detect_room_type(text)
+        preference = self._detect_preference_type(text)
+
+        # 都没有 → 返回None
+        if not scene_key and not preference:
+            return None
+
+        # 没有场景 → 用全屋作为默认场景
+        if not scene_key:
+            scene_key = "whole_house"
+            scene_name = "全屋定制"
+
+        # 没有偏好 → 默认推荐我
+        if not preference:
+            preference = "recommend_me"
+
+        scene_cfg, private_scene_name = self._get_private_scene_config(scene_key)
+        if not scene_cfg:
+            # 场景映射不到私有矩阵，返回None让上层走公用逻辑
+            return None
+
+        mat_key, reason = self._pick_private_material(scene_cfg, preference)
+        if not mat_key:
+            return None
+
+        mat_name, mat_price = self._get_private_material_info(mat_key)
+        if not mat_name:
+            return None
+
+        # 跟进提问（用价格摸底的话术，推进到Step2）
+        follow_up = f"您家{private_scene_name}大概多大面积呀？我给您算个详细报价。"
+
+        # 混搭方案
+        mix_match = scene_cfg.get("mix_match", "")
+
+        return {
+            "material": mat_key,
+            "material_name": mat_name,
+            "material_price": mat_price,
+            "reason": reason,
+            "scene_key": scene_key,
+            "scene_name": private_scene_name,
+            "preference": preference,
+            "follow_up": follow_up,
+            "mix_match": mix_match,
+            "is_private": True,
+        }
+
     # ---------- 多场景分场景推荐 ----------
     def _join_scene_names(self, scene_names):
         """
@@ -1538,6 +1778,17 @@ class CustomerServiceEngine:
         返回：(material_key, material_name, material_price, reason) 或 (None, None, None, None)
         """
         from customer_service.shop_config_loader import get_material_name, get_material_price
+
+        # 有私有矩阵 → 先走私有矩阵逻辑
+        if self.private_rec_matrix:
+            scene_cfg, _ = self._get_private_scene_config(scene_key)
+            if scene_cfg:
+                mat_key, reason = self._pick_private_material(scene_cfg, preference)
+                if mat_key:
+                    mat_name, mat_price = self._get_private_material_info(mat_key)
+                    if mat_name:
+                        return mat_key, mat_name, mat_price, reason
+            # 私有矩阵查不到 → 继续往下走公用矩阵逻辑
 
         matrix = self.rec_matrix.get("matrix", {})
         scene_cfg = matrix.get(scene_key, {})
@@ -3381,16 +3632,49 @@ class CustomerServiceEngine:
         if rec_result:
             mat_key = rec_result["material"]
             recommend_reason = rec_result["reason"]
+            # 私有矩阵 → 直接组装推荐话术
+            if rec_result.get("is_private"):
+                mat_name = rec_result["material_name"]
+                mat_price = rec_result["material_price"]
+                mix_match = rec_result.get("mix_match", "")
+                parts = [
+                    f"根据您的情况，我推荐用【{mat_name}】，{mat_price}一平。",
+                    recommend_reason,
+                ]
+                if mix_match:
+                    parts.append(mix_match)
+                reply = "\n".join(parts)
+                self.selected_material = mat_key
+                return "bargain/recommend_material", reply, {
+                    "bargain_step": 2,
+                    "selected_material": mat_key,
+                }
         else:
             # 检测不出来 → 用主推材料 + 默认推荐理由
             mat_key = self.config.get("main_material")
             # 从矩阵的default场景里找recommend_me的理由
-            matrix = self.rec_matrix.get("matrix", {})
-            default_rec = matrix.get("default", {}).get("recommend_me", {})
-            if isinstance(default_rec, dict):
-                recommend_reason = default_rec.get("reason", "性价比高，家用合适")
+            # 私有矩阵有就用私有矩阵的全屋主推，否则用公用矩阵
+            if self.private_rec_matrix:
+                scenes = self.private_rec_matrix.get("scenes", {})
+                whole_house_cfg = None
+                for name, cfg in scenes.items():
+                    if cfg.get("scene_key") == "whole_house":
+                        whole_house_cfg = cfg
+                        break
+                if whole_house_cfg:
+                    main_push = whole_house_cfg.get("main_push")
+                    if main_push:
+                        mat_key = main_push
+                        recommend_reason = whole_house_cfg.get("reason", "性价比高，家用合适")
+                else:
+                    recommend_reason = "性价比高，家用合适"
             else:
-                recommend_reason = "性价比高，家用合适"
+                matrix = self.rec_matrix.get("matrix", {})
+                default_rec = matrix.get("default", {}).get("recommend_me", {})
+                if isinstance(default_rec, dict):
+                    recommend_reason = default_rec.get("reason", "性价比高，家用合适")
+                else:
+                    recommend_reason = "性价比高，家用合适"
         
         extra_vars = {"recommend_reason": recommend_reason}
         reply = self._render_bargain_template(
@@ -4028,28 +4312,45 @@ class CustomerServiceEngine:
                 self.bargain_step = 2
                 self.bargain_pullback_count = 0
                 print(f"  状态推进: bargain_step → {self.bargain_step}")
-                try:
-                    recommend_text = self._render_bargain_template(
-                        "bargain_recommendation_v2",
-                        material=mat_key,
-                        extra_vars={
-                            "recommend_reason": reason,
-                            "recommended_material_name": rec_result["material_name"],
-                            "recommended_material_price": str(rec_result["material_price"]),
-                            "board_brand": self.config.get("board_brand", ""),
-                            "eco_level": self.config.get("eco_level", ""),
-                            "hardware_brand": self.config.get("hardware_brand", ""),
-                            "edge_banding": self.config.get("edge_band", ""),
-                        }
-                    )
-                    print("  模板渲染: bargain_recommendation_v2 成功")
-                except Exception as e:
-                    print(f"  模板渲染: bargain_recommendation_v2 失败: {e}")
-                    # 渲染失败 → fallback到老模板
-                    recommend_text = self._render_bargain_template(
-                        "bargain_material_price", material=mat_key
-                    )
-                    print("  fallback到老模板: bargain_material_price")
+
+                # 私有推荐矩阵 → 用私有格式组装话术
+                if rec_result.get("is_private"):
+                    mat_name = rec_result["material_name"]
+                    mat_price = rec_result["material_price"]
+                    mix_match = rec_result.get("mix_match", "")
+                    recommend_parts = [
+                        f"根据您的情况，我推荐用【{mat_name}】，{mat_price}一平。",
+                        reason,
+                    ]
+                    if mix_match:
+                        recommend_parts.append(mix_match)
+                    recommend_text = "\n".join(recommend_parts)
+                    print("  私有矩阵推荐话术组装成功")
+                else:
+                    # 公用矩阵 → 走原有模板渲染
+                    try:
+                        recommend_text = self._render_bargain_template(
+                            "bargain_recommendation_v2",
+                            material=mat_key,
+                            extra_vars={
+                                "recommend_reason": reason,
+                                "recommended_material_name": rec_result["material_name"],
+                                "recommended_material_price": str(rec_result["material_price"]),
+                                "board_brand": self.config.get("board_brand", ""),
+                                "eco_level": self.config.get("eco_level", ""),
+                                "hardware_brand": self.config.get("hardware_brand", ""),
+                                "edge_banding": self.config.get("edge_band", ""),
+                            }
+                        )
+                        print("  模板渲染: bargain_recommendation_v2 成功")
+                    except Exception as e:
+                        print(f"  模板渲染: bargain_recommendation_v2 失败: {e}")
+                        # 渲染失败 → fallback到老模板
+                        recommend_text = self._render_bargain_template(
+                            "bargain_material_price", material=mat_key
+                        )
+                        print("  fallback到老模板: bargain_material_price")
+
                 full_answer = recommend_text + "\n" + follow_up
                 print(f"  最终回答: {full_answer[:80]}...")
                 return f"bargain/recommend/{scene_key}", full_answer
