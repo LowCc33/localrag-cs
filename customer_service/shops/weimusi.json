@@ -8,7 +8,8 @@
     "wechat_id": "13584129808",
     "after_sales_phone": "4006811018",
     "default_material": "aluminum_welded",
-    "main_material": "carbon_resin"
+    "main_material": "carbon_resin",
+    "customer_service_name": "小维"
   },
   "pricing": {
     "base_price_method": "展开面积",
@@ -18,7 +19,9 @@
     "measurement_fee": "免费（下定可退）",
     "installation_fee": "免费（市区内包安装）",
     "delivery_fee": "免费（市区内包运输）",
-    "design_fee": "免费（下定后免费出设计图）"
+    "design_fee": "免费（下定后免费出设计图）",
+    "kitchen_price_method": "投影面积",
+    "_kitchen_price_note": "橱柜计价方式待老板娘确认，暂时用投影面积"
   },
   "materials": {
     "default_board_brand": "捷定",
