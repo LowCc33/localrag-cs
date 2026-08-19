@@ -3634,7 +3634,30 @@ class CustomerServiceEngine:
         """
         # 从推荐矩阵里查，优先用当前用户输入做场景+偏好检测
         text = getattr(self, "_current_bargain_text", "")
-        
+
+        # ===== 多场景推荐（优先级最高） =====
+        # 检测到 >=2 个场景 → 走多场景分场景推荐逻辑
+        if text:
+            room_types = self._detect_room_types(text)
+            if len(room_types) >= 2:
+                pref_type = self._detect_preference_type(text)
+                multi_rec = self._multi_scene_recommendation(text, preference=pref_type)
+                if multi_rec and multi_rec.get("answer"):
+                    # 多场景推荐成功 → 直接用返回的话术
+                    # selected_material 取第一个场景的主推材料
+                    scenes = multi_rec.get("scenes", [])
+                    first_mat = scenes[0]["recommended_material"] if scenes else None
+                    reply = multi_rec["answer"]
+                    # 加一句过渡开头，让话术更自然
+                    reply = "根据您的情况，我给您分别说一下：\n" + reply
+                    state_updates = {
+                        "bargain_step": 2,
+                        "selected_material": first_mat,
+                        "bargain_pullback_count": 0,
+                    }
+                    print(f"  [多场景推荐] 命中{len(scenes)}个场景，主材料={first_mat}")
+                    return "bargain/recommend_material", reply, state_updates
+
         rec_result = None
         if text:
             rec_result = self._get_recommendation(text)
