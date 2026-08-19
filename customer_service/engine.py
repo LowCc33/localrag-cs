@@ -1383,7 +1383,7 @@ class CustomerServiceEngine:
                 "儿童", "小孩", "宝宝", "儿子房", "女儿房",
             ]),
             ("tatami", [
-                "榻榻米", "地台", "踏踏米", "和室", "书房",
+                "榻榻米", "地台", "踏踏米", "做榻榻米", "书房",
             ]),
             ("kitchen", [
                 "厨房", "橱柜", "厨柜", "厨房柜子", "灶台", "吊柜",
@@ -1429,7 +1429,7 @@ class CustomerServiceEngine:
                 "儿童", "小孩", "宝宝", "儿子房", "女儿房",
             ]),
             ("tatami", [
-                "榻榻米", "地台", "踏踏米", "和室", "书房",
+                "榻榻米", "地台", "踏踏米", "做榻榻米", "书房",
             ]),
             ("kitchen", [
                 "厨房", "橱柜", "厨柜", "厨房柜子", "灶台", "吊柜",
@@ -1489,6 +1489,7 @@ class CustomerServiceEngine:
             "好点的", "用好料", "品质好的", "高端", "最好的", "顶级", "一步到位",
             "好点", "好的", "高档", "上档次", "最好", "顶配",
             "档次高", "档次高点", "高档次", "档次高点的",
+            "品质高点", "品质高点的", "品质高的",
             "好一点", "好一点的", "好点儿", "好点儿的",
             "要好的", "要高端", "要高档",
         ]
@@ -1619,12 +1620,12 @@ class CustomerServiceEngine:
         return self.PRIVATE_SCENE_MAP.get(scene_key)
 
     def _get_private_scene_config(self, scene_key):
-        """从私有矩阵里拿到指定场景的配置，拿不到返回None"""
+        """从私有矩阵里拿到指定场景的配置，拿不到返回(None, None)"""
         if not self.private_rec_matrix:
-            return None
+            return None, None
         private_key = self._map_to_private_scene(scene_key)
         if not private_key:
-            return None
+            return None, None
         scenes = self.private_rec_matrix.get("scenes", {})
         for scene_name, cfg in scenes.items():
             if cfg.get("scene_key") == private_key:
