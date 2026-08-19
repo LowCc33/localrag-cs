@@ -1488,6 +1488,9 @@ class CustomerServiceEngine:
         quality_keywords = [
             "好点的", "用好料", "品质好的", "高端", "最好的", "顶级", "一步到位",
             "好点", "好的", "高档", "上档次", "最好", "顶配",
+            "档次高", "档次高点", "高档次", "档次高点的",
+            "好一点", "好一点的", "好点儿", "好点儿的",
+            "要好的", "要高端", "要高档",
         ]
         # 性价比关键词
         cost_keywords = [
@@ -2631,7 +2634,9 @@ class CustomerServiceEngine:
 10. shop_info - 用户问店铺地址/位置/工厂/能不能参观，如公司在哪、工厂在哪、可以参观吗
 11. shop_history - 用户问经营历史/年限，如开店多久了、做了多少年、是老品牌吗
 12. measurement - 用户问量房/工期/设计，如量房免费吗、工期多久、什么时候上门、设计费
-13. product_type - 用户问产品种类/业务范围，如能做什么柜子、有榻榻米吗、做橱柜吗
+13. product_type - 用户纯问产品种类/业务范围/能做什么，如能做什么柜子、有榻榻米吗、你们都做什么
+    注意：如果用户是在说"我要做橱柜+衣柜""厨房做什么板材好"这类带选材/价格意图的，归为 price_query，不是 product_type
+    注意：用户在选材料阶段说场景（如"做橱柜和衣柜""档次高点的，衣柜用什么"），归为 price_query，走议价状态机，不是 product_type
 14. lead_capture - 用户主动留联系方式或约上门，如我微信xxx、我家住xxx、过来量房吧
 15. ask_contact - 用户问怎么联系你们，如你微信多少、留个电话、怎么联系、地址在哪（注意：纯问地址归shop_info）
 16. greeting - 用户打招呼，如你好、在吗、有人吗、嗨
@@ -3557,6 +3562,11 @@ class CustomerServiceEngine:
   * 其他动作 → 传空字符串
 - 只能从上面14个动作中选一个，不能自创动作
 - 选择动作时优先考虑：不要乱推进状态，用户没明确表示推进就停留在当前阶段
+- Step1（已报价格区间）时，优先级：
+  1) 用户说了场景+偏好 → recommend_material（推荐材料并报实价）
+  2) 用户明确说某种材料 → quote_material_price（报指定材料价格）
+  3) 用户重复问价格/没听懂 → restate_price_range（重述价格区间）
+  不要把"用户说做哪些柜子/选什么档次"当成无关问题，这是在选材料的信号
 """
 
         user_msg = f"用户当前输入：{text}\n\n请选择动作并输出JSON："
@@ -4115,7 +4125,28 @@ class CustomerServiceEngine:
             reply = self._render_bargain_template("bargain_price_range")
             return "bargain/price_range", reply
 
-        # Step 1+：先做事实问题预检查，能直接答的就不麻烦LLM了
+        # Step 1+：先检查是否是选材料信号，命中就直接推荐（优先级最高）
+        # 原因：LLM意图分类有时会把"做橱柜和衣柜"归为product_type或事实类，导致走不到推荐
+        # 只在 bargain_step == 1 时生效
+        # 误判防护：纯疑问句（有吗/呢/怎么/怎样/如何/行不行/好不好/怎么样）且无选择信号的，跳过
+        if self.bargain_step == 1:
+            pref_type = self._detect_preference_type(text)
+            room_types = self._detect_room_types(text)
+            if pref_type or room_types:
+                # 误判防护：纯疑问句且无选择信号 → 不触发推荐（如"环保吗""品质怎么样"）
+                pure_question_keywords = ["吗", "呢", "怎么", "怎样", "如何", "行不行", "好不好", "怎么样"]
+                choice_signal_keywords = ["要", "选", "用", "想要", "给我来", "来个", "就要", "就用", "就选", "做", "你推荐"]
+                is_pure_question = any(kw in text for kw in pure_question_keywords)
+                has_choice_signal = any(kw in text for kw in choice_signal_keywords)
+                if not (is_pure_question and not has_choice_signal):
+                    # 命中 → 直接走推荐动作，不调LLM
+                    print(f"  [Step1兜底推荐] 命中偏好={pref_type}, 场景数={len(room_types)}，直接走recommend_material")
+                    tag, reply, state_updates = self._action_recommend_material("")
+                    for key, value in state_updates.items():
+                        setattr(self, key, value)
+                    return tag, reply
+
+        # 然后才是事实问题预检查，能直接答的就不麻烦LLM了
         # 适用：店铺信息、环保等级、工艺细节、材料对比、计价方式等事实类问题
         # 好处：减少LLM调用，提高响应速度和稳定性，避免LLM选错动作
         fact_answer = None
