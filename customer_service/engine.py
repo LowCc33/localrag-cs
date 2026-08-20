@@ -2394,7 +2394,7 @@ class CustomerServiceEngine:
             elif has_basement and not has_outdoor:
                 detail = "常年潮湿不通风，木质的容易发霉变形，焊接大板最靠谱"
             else:
-                detail = "潮湿+户外环境都得扛得住，只能用焊接大板才放心，碳脂板日晒雨淋容易出问题"
+                detail = "潮湿+户外环境都得扛得住，只能用焊接大板才放心，其它板容易出问题"
             lines.append(f"  特别是{outdoor_names}，{detail}。")
 
         # === 混搭建议（实用区的场景都可以提混搭） ===
@@ -4757,30 +4757,62 @@ class CustomerServiceEngine:
                         setattr(self, key, value)
                     return tag, reply
 
-        # 然后才是事实问题预检查，能直接答的就不麻烦LLM了
-        # 适用：店铺信息、环保等级、工艺细节、材料对比、计价方式等事实类问题
-        # 好处：减少LLM调用，提高响应速度和稳定性，避免LLM选错动作
-        fact_answer = None
-        
-        # 1) 关键词匹配hot_questions（已经自动跳过bargain_only和工艺类）
-        hot_result = self._match_hot_question(text)
-        if hot_result:
-            hot_tag, hot_answer = hot_result
-            # 排除材料推荐类问题（material_recommend_xxx），这些应该走议价推荐矩阵
-            # 否则会命中公用模板里的木质推荐话术（多层板/颗粒板等）
-            if "material_recommend" not in hot_tag:
-                fact_answer = hot_answer
-        # 2) 工艺匹配
-        if not fact_answer:
-            process_match = self._match_process_by_keywords(text)
-            if process_match:
-                pkey, pname, can_do, atpl = process_match
-                fact_answer = self._get_process_answer(pkey, pname, can_do, atpl)
-        # 3) 知识库检索（高分才用，阈值设高一点避免误伤议价流程）
-        if not fact_answer:
-            kb_results = self._search_knowledge_base(text, top_k=1)
-            if kb_results and kb_results[0]["score"] > 5.0:
-                fact_answer = self._render(kb_results[0]["answer"])
+        # ===== 议价状态下确定性信号优先检测（在事实问题检查之前）=====
+        # 原因：事实问题预检查（hot_questions/工艺/知识库）有时会误匹配，
+        # 把用户报面积/选材料/砍价等明确信号给截胡了，导致议价流程跑偏。
+        # 原则：议价状态下，明确的流程推进信号 > 事实问题回答
+        size_val, input_type, raw_qty = self._detect_order_size(text)
+        material = self._detect_material_choice(text)
+        is_bargain = self._is_bargain_question(text)
+
+        # Step2或Step3（已报价/摸底阶段）+ 检测到面积/数量 → 直接推进到step4报优惠价
+        # 优先级最高，绝对不能被事实问题匹配截胡
+        if self.bargain_step in (2, 3) and size_val:
+            order_desc = self._gen_order_desc(size_val, input_type, raw_qty)
+            print(f"  [确定性信号] Step{self.bargain_step}检测到面积={size_val} ({order_desc})，直接推进到Step4")
+            # 如果还没选材料，用默认材料
+            if not self.selected_material:
+                self.selected_material = self.config.get("default_material", "particle_board")
+            self.bargain_step = 4
+            self.bargain_pullback_count = 0
+            reply = self._render_bargain_template(
+                f"bargain_{size_val}",
+                material=self.selected_material,
+                order_desc=order_desc
+            )
+            reply = self._append_lead_hook(reply)
+            return f"bargain/{size_val}", reply
+
+        # 砍价信号（任何阶段）→ 跳过事实问题检查，直接交给LLM决策层
+        # 原因：知识库经常把'能便宜吗'误匹配成'厨房能用吗'这类问题，导致砍价跑偏
+        if is_bargain and self.bargain_step >= 1:
+            print(f"  [确定性信号] 检测到砍价意图，跳过事实问题检查")
+            fact_answer = None  # 确保不命中事实问题
+        else:
+            # 没有砍价信号 → 正常做事实问题预检查
+            fact_answer = None
+            # 1) 关键词匹配hot_questions（已经自动跳过bargain_only和工艺类）
+            hot_result = self._match_hot_question(text)
+            if hot_result:
+                hot_tag, hot_answer = hot_result
+                # 排除材料推荐类问题（material_recommend_xxx），这些应该走议价推荐矩阵
+                if "material_recommend" not in hot_tag:
+                    fact_answer = hot_answer
+            # 2) 工艺匹配
+            if not fact_answer:
+                process_match = self._match_process_by_keywords(text)
+                if process_match:
+                    pkey, pname, can_do, atpl = process_match
+                    fact_answer = self._get_process_answer(pkey, pname, can_do, atpl)
+            # 3) 知识库检索（高分才用，阈值设高一点避免误伤议价流程）
+            # ponytail: 额外限制——只有看起来是在提问的句子才走知识库检索
+            # 陈述句（如'大概吧''20个平'）不检索，避免误匹配跑偏
+            question_markers = ["?", "？", "吗", "呢", "怎么", "什么", "为什么", "怎样", "如何", "多少", "区别", "对比", "哪个好", "好不好", "行不行"]
+            looks_like_question = any(m in text for m in question_markers)
+            if not fact_answer and looks_like_question:
+                kb_results = self._search_knowledge_base(text, top_k=1)
+                if kb_results and kb_results[0]["score"] > 10.0:
+                    fact_answer = self._render(kb_results[0]["answer"])
         
         # 命中事实问题 → 先回答，再追加议价拉回话术，状态不推进
         if fact_answer:
