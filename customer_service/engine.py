@@ -1919,7 +1919,14 @@ class CustomerServiceEngine:
                     candidates.append((price, mat_key))
             if candidates:
                 candidates.sort()
-                return candidates[0][1], reason
+                chosen = candidates[0][1]
+                # ponytail: 性价比选出来的可能不是主推款，不能硬套主推款的reason
+                # 如果选的不是主推款，用通用理由，避免材料和理由对不上
+                if chosen == main_push:
+                    return chosen, reason
+                mat_name = mats.get(chosen, {}).get("name", chosen)
+                generic_reason = f"{mat_name}性价比不错，各方面都够用，家用挺合适的"
+                return chosen, generic_reason
             # 兜底：如果没有recommend级别的，再看can_do
             for mat_key in ["spc", "honeycomb", "welded", "carbon"]:
                 level = scene_cfg.get(mat_key, "not_recommend")
@@ -1928,7 +1935,12 @@ class CustomerServiceEngine:
                     candidates.append((price, mat_key))
             if candidates:
                 candidates.sort()
-                return candidates[0][1], reason
+                chosen = candidates[0][1]
+                if chosen == main_push:
+                    return chosen, reason
+                mat_name = mats.get(chosen, {}).get("name", chosen)
+                generic_reason = f"{mat_name}价格实惠，预算有限可以选这个"
+                return chosen, generic_reason
             # 再兜底用主推
             if main_push:
                 return main_push, reason
@@ -2241,7 +2253,10 @@ class CustomerServiceEngine:
         else:
             follow_up = "\n您看这个搭配可以不？大概做多大？"
 
-        return answer + follow_up
+        # ponytail: 话术拼接后统一清洗，避免重复句号、逗号接句号等小瑕疵
+        full = answer + follow_up
+        full = full.replace("。。", "。").replace("，。", "。")
+        return full
 
     def _build_multi_scene_quality_answer(self, scene_data_list):
         """
@@ -2309,23 +2324,28 @@ class CustomerServiceEngine:
             upgrade_names = "、".join([s["name"] for s in upgrade_scenes])
             lines.append(f"· 【{carbon_name}】{carbon_price}一平：预算够的话，{upgrade_names}可以用这个升级，颜值更高，质感更好。")
 
-        # === 混搭建议（如果有厨房/浴室/阳台等潮湿场景） ===
-        wet_scenes = []
+        # === 混搭建议（仅室内潮湿场景：厨房/浴室/室内阳台） ===
+        # ponytail: 室外阳台不提混搭（柜门也得耐造，不能用碳脂板）
+        # 衣柜/鞋柜/电视柜等也不提混搭（一般通体用一种材料）
+        mix_match_scenes = []
         for s in scene_data_list:
             attrs = s.get("attributes", [])
             scene_key = s["scene_key"]
-            # 厨房、浴室、阳台属于潮湿场景，可以混搭
-            if scene_key in ("kitchen", "bathroom", "balcony") or "wet" in attrs:
-                wet_scenes.append(s["scene_name"])
+            # 只在厨房、浴室、室内阳台（无outdoor）提混搭
+            if scene_key in ("kitchen", "bathroom", "balcony") and "outdoor" not in attrs:
+                mix_match_scenes.append(s["scene_name"])
 
-        if wet_scenes:
-            wet_text = "、".join(wet_scenes)
-            lines.append(f"  像{wet_text}这些地方，很多客户是柜体用{welded_name}+柜门用{carbon_name}混搭，既防潮耐造又有颜值，性价比也不错。")
+        if mix_match_scenes:
+            mix_text = "、".join(mix_match_scenes)
+            lines.append(f"  像{mix_text}这些地方，很多客户是柜体用{welded_name}+柜门用{carbon_name}混搭，既防潮耐造又有颜值，性价比也不错。")
 
         # === 结尾跟进 ===
         lines.append("您看这个搭配可以不？大概做多大面积？")
 
-        return "\n".join(lines)
+        # ponytail: 话术拼接后统一清洗，避免重复句号、逗号接句号等小瑕疵
+        answer = "\n".join(lines)
+        answer = answer.replace("。。", "。").replace("，。", "。")
+        return answer
 
     def _get_generic_reason(self, material_name, scene_data_list):
         """
