@@ -2440,8 +2440,19 @@ class CustomerServiceEngine:
         lines.append("您看这个搭配可以不？大概做多大面积？")
 
         # ponytail: 话术拼接后统一清洗，避免重复句号、逗号接句号等小瑕疵
-        answer = "\n".join(lines)
+        # ponytail: 不用换行，改成一段式，避免飞书端每行首字被吃掉的显示bug
+        # 每行去掉行首的列表符号/空格/缩进，用句号连接成一整段
+        cleaned_segments = []
+        for line in lines:
+            # 去掉行首的列表符号、空格、全角空格、中间点等
+            s = line.lstrip(" ·　")
+            if s:
+                cleaned_segments.append(s)
+        answer = "。".join(cleaned_segments)
+        # 清洗：问句结尾不用句号改、重复句号、句号+逗号等
+        answer = answer.replace("？。", "？").replace("！。", "！")
         answer = answer.replace("。。", "。").replace("，。", "。")
+        answer = answer.replace("：。", "：")
         return answer
 
     def _get_generic_reason(self, material_name, scene_data_list):
@@ -4795,13 +4806,77 @@ class CustomerServiceEngine:
         # 原因：事实问题预检查（hot_questions/工艺/知识库）有时会误匹配，
         # 把用户报面积/选材料/砍价等明确信号给截胡了，导致议价流程跑偏。
         # 原则：议价状态下，明确的流程推进信号 > 事实问题回答
+
+        # 上一轮待确认面积 + 本轮回答了投影/展开 → 确认面积类型并报优惠
+        # ponytail: 用户说"20平"→反问投影还是展开→用户说"投影的"，要能关联起来
+        projection_answer_words = ["投影", "投影面积", "按投影", "投影算"]
+        expanded_answer_words = ["展开", "展开面积", "按展开", "展开算", "实际面积", "按实际"]
+        has_proj_answer = any(kw in text for kw in projection_answer_words)
+        has_exp_answer = any(kw in text for kw in expanded_answer_words)
+
+        if hasattr(self, '_pending_area') and self._pending_area and (has_proj_answer or has_exp_answer):
+            # 有待确认的面积 + 用户回答了类型 → 重新计算并推进
+            pending_val = self._pending_area['value']
+            pending_raw = self._pending_area['raw']
+            if has_proj_answer:
+                # 投影面积 → ×2.5转展开
+                real_area = pending_val * 2.5
+                raw_display = f"投影{pending_raw}平(展开约{real_area:.0f}平)"
+            else:
+                real_area = pending_val
+                raw_display = str(pending_raw)
+            # 重新分档
+            if real_area >= 50:
+                size_val = "xlarge"
+            elif real_area >= 30:
+                size_val = "large"
+            elif real_area >= 15:
+                size_val = "medium"
+            else:
+                size_val = "small"
+            order_desc = raw_display
+            print(f"  [确定性信号] 用户确认面积类型={has_proj_answer and '投影' or '展开'}, 重新分档={size_val}，推进到Step4")
+            if not self.selected_material:
+                self.selected_material = self.config.get("default_material", "particle_board")
+            self.bargain_step = 4
+            self.bargain_pullback_count = 0
+            self._pending_area = None  # 清掉待确认
+            reply = self._render_bargain_template(
+                f"bargain_{size_val}",
+                material=self.selected_material,
+                order_desc=order_desc
+            )
+            reply = self._append_lead_hook(reply)
+            return f"bargain/{size_val}", reply
+
         size_val, input_type, raw_qty = self._detect_order_size(text)
         material = self._detect_material_choice(text)
         is_bargain = self._is_bargain_question(text)
 
-        # Step2或Step3（已报价/摸底阶段）+ 检测到面积/数量 → 直接推进到step4报优惠价
+        # Step2或Step3（已报价/摸底阶段）+ 检测到面积/数量 → 推进到step4报优惠价
         # 优先级最高，绝对不能被事实问题匹配截胡
         if self.bargain_step in (2, 3) and size_val:
+            # ponytail: 没明确说投影还是展开的，先反问确认，避免算错面积
+            projection_words = ["投影", "投影面积", "按投影算", "投影算"]
+            expanded_words = ["展开", "展开面积", "按展开算", "实际面积", "按实际算"]
+            has_projection = any(kw in text for kw in projection_words)
+            has_expanded = any(kw in text for kw in expanded_words)
+
+            if input_type == "area" and not has_projection and not has_expanded:
+                # 只说了面积数字，没说是投影还是展开 → 先问清楚
+                # 同时存下面积，等用户回答了类型后直接用
+                try:
+                    area_val = float(raw_qty) if raw_qty and isinstance(raw_qty, str) and raw_qty.replace('.', '').isdigit() else None
+                except (ValueError, TypeError):
+                    area_val = None
+                if area_val:
+                    self._pending_area = {'value': area_val, 'raw': raw_qty}
+                else:
+                    self._pending_area = None
+                reply = "您说的是投影面积还是展开面积呀？展开大概是投影的2.5倍左右，这点我先跟您说清楚，免得后面报价有出入。"
+                return "bargain/ask_area_type", reply
+
+            # 明确说了投影/展开 → 推进到Step4报优惠
             order_desc = self._gen_order_desc(size_val, input_type, raw_qty)
             print(f"  [确定性信号] Step{self.bargain_step}检测到面积={size_val} ({order_desc})，直接推进到Step4")
             # 如果还没选材料，用默认材料
