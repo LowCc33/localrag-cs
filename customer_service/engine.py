@@ -410,33 +410,33 @@ class CustomerServiceEngine:
 
     def _get_context_materials(self):
         """
-        从最近几轮对话中提取上下文提到的板材
-        往前遍历最近5轮，每轮的bot消息和用户消息都查
-        找到最近一条提到板材的消息，提取里面的板材名称，去重，按出现顺序返回
+        从最近一条提到板材的消息中提取上下文板材
+        往前遍历最近5轮对话，每轮的bot消息和用户消息都查
+        找到第一条提到板材的消息就返回（只取那一条里的，不跨越多条合并）
+        用户说'这两种'指的是刚讨论的那一组，不是历史上所有提过的混在一起
         遍历完5轮都没找到 → 返回空列表
         """
         if not self.history:
             return []
         # 往前找最近5轮（从最新的开始）
         checked = 0
-        all_found = []  # 按出现顺序，去重
-        seen = set()
         for entry in reversed(self.history):
             if checked >= 5:
                 break
             checked += 1
-            # bot消息和用户消息都查
+            # 先查bot消息（优先级更高，因为是系统说的）
             bot_text = entry.get("bot", "")
+            if bot_text:
+                mats = self._extract_materials_from_text(bot_text)
+                if mats:
+                    return mats
+            # 再查用户消息
             user_text = entry.get("user", "")
-            for text in (bot_text, user_text):
-                if not text:
-                    continue
-                mats = self._extract_materials_from_text(text)
-                for m in mats:
-                    if m not in seen:
-                        all_found.append(m)
-                        seen.add(m)
-        return all_found
+            if user_text:
+                mats = self._extract_materials_from_text(user_text)
+                if mats:
+                    return mats
+        return []
 
     def _detect_pronoun_type(self, text):
         """检测指代词类型：返回 'exact_two' / 'ambiguous' / None"""
