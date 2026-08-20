@@ -380,12 +380,182 @@ class CustomerServiceEngine:
         return Template(raw).render(**self._vars())
 
     # ---------- 1) 高频问题前置命中（最高优先级，不走 LLM） ----------
+    # ========== 指代词 + 上下文板材 智能匹配 ==========
+    # 板材类型关键词映射（用于从回答文本中提取提到了哪些板材）
+    MATERIAL_NAME_KEYWORDS = {
+        "spc": ["SPC", "spc蜂窝", "SPC蜂窝"],
+        "honeycomb": ["全铝蜂窝", "蜂窝板", "铝蜂窝"],
+        "welded": ["焊接大板", "全铝焊接", "焊接板"],
+        "carbon": ["碳脂板", "碳脂", "碳酯板"],
+    }
+
+    # 明确指向2种的指代词
+    EXACT_TWO_PRONOUNS = ["这两种", "这两款", "这两个", "这俩", "那两种", "那两款", "那两个"]
+    # 数量模糊的指代词（可能2种，也可能全部）
+    AMBIGUOUS_PRONOUNS = ["这些", "它们", "他们", "这几种", "这几样", "那几种"]
+    # 单数指代词（指向1种）
+    SINGLE_PRONOUNS = ["这个板", "这个板材", "这种板", "这种板材", "这款", "这款板", "这款板材", "那个板", "那种板"]
+    # 对比词（说明用户在问区别）
+    COMPARE_WORDS = ["区别", "哪个好", "怎么选", "对比", "差别", "不一样", "优缺点", "有啥区别", "什么区别"]
+
+    def _extract_materials_from_text(self, text):
+        """从文本中提取提到了哪些板材，返回板材key列表（去重，按出现顺序）"""
+        if not text:
+            return []
+        found = []
+        for mat_key, keywords in self.MATERIAL_NAME_KEYWORDS.items():
+            if any(kw in text for kw in keywords):
+                found.append(mat_key)
+        return found
+
+    def _get_context_materials(self):
+        """从上一轮bot回答中提取上下文提到的板材"""
+        if not self.history:
+            return []
+        # 找最近一条bot消息
+        for entry in reversed(self.history):
+            bot_text = entry.get("bot", "")
+            if bot_text:
+                return self._extract_materials_from_text(bot_text)
+        return []
+
+    def _detect_pronoun_type(self, text):
+        """检测指代词类型：返回 'exact_two' / 'ambiguous' / None"""
+        if not text:
+            return None
+        # 先检查明确2种的（优先级更高）
+        if any(kw in text for kw in self.EXACT_TWO_PRONOUNS):
+            return "exact_two"
+        # 再检查模糊型
+        if any(kw in text for kw in self.AMBIGUOUS_PRONOUNS):
+            return "ambiguous"
+        return None
+
+    def _has_compare_word(self, text):
+        """检测有没有对比相关的词"""
+        return any(kw in text for kw in self.COMPARE_WORDS)
+
+    def _resolve_pronoun_material_compare(self, text):
+        """
+        指代词+上下文板材智能解析：
+        用户用"这两种/它们/这个板"等指代问板材问题时，结合上一轮回答的内容判断。
+        返回 (category, answer) 或 None（无法解析则走原有关键词匹配）
+
+        【对比型问题】（有区别/哪个好/对比等词）：
+        - 明确2种型（这两种）+ 上文正好2种 → 精准对比
+        - 明确2种型 + 上文≠2种 → 反问
+        - 模糊型（它们/这些）+ 上文正好2种 → 精准对比
+        - 模糊型 + 上文3-4种 → 四款总览（和原来一样）
+        - 模糊型 + 上文1种 → 该板材详情
+
+        【详情型问题】（单数指代词，没有对比词）：
+        - 上文正好1种 → 答该板材详情
+        """
+        # ===== 详情型问题：单数指代词 + 没有对比词 =====
+        is_single_pronoun = any(kw in text for kw in self.SINGLE_PRONOUNS)
+        if is_single_pronoun and not self._has_compare_word(text):
+            context_materials = self._get_context_materials()
+            if len(context_materials) == 1:
+                detail_result = self._get_material_detail_answer(context_materials[0])
+                if detail_result:
+                    return detail_result
+            return None  # 上下文不是1种或没有详情模板，走原有逻辑
+
+        pronoun_type = self._detect_pronoun_type(text)
+        if pronoun_type is None:
+            return None  # 没有指代词，走原有关键词匹配
+
+        # 有指代词，但没有对比词 → 不是在问对比，走原有逻辑
+        if not self._has_compare_word(text):
+            return None
+
+        context_materials = self._get_context_materials()
+        num_context = len(context_materials)
+
+        if num_context == 0:
+            return None  # 上文没有板材，走原有关键词匹配
+
+        # === 明确2种型 ===
+        if pronoun_type == "exact_two":
+            if num_context == 2:
+                # 正好2种 → 精准对比
+                return self._render_material_compare_for(context_materials)
+            else:
+                # 不是正好2种 → 反问，别瞎猜
+                reply = "您说的是哪两种板材呀？我们有SPC蜂窝板、全铝蜂窝板、焊接大板和碳脂板四种，您指的是哪两种的对比？"
+                return "material/pronoun_clarify", reply
+
+        # === 模糊型 ===
+        if pronoun_type == "ambiguous":
+            if num_context == 1:
+                # 只有1种 → 答该板材详情
+                # 找对应详情模板
+                mat = context_materials[0]
+                detail_result = self._get_material_detail_answer(mat)
+                if detail_result:
+                    return detail_result
+                # 找不到详情模板就返回None走原有逻辑
+                return None
+            elif num_context == 2:
+                # 正好2种 → 精准对比
+                return self._render_material_compare_for(context_materials)
+            else:
+                # 3-4种 → 四款总览（和原逻辑一样，返回None走关键词匹配）
+                # 但这里可以直接返回，省得再匹配一遍
+                # 走原有关键词匹配，确保和原来的四款总览模板一致
+                return None  # 交给原有关键词匹配处理
+
+        return None
+
+    def _render_material_compare_for(self, mat_keys):
+        """根据具体的2种板材，返回对应的精准对比回答
+        目前只支持 welded+carbon 的精准对比，其他组合返回None走总览
+        """
+        if len(mat_keys) != 2:
+            return None
+
+        m_set = set(mat_keys)
+
+        # 焊接大板 vs 碳脂板 → 用welded_vs_carbon模板
+        if m_set == {"welded", "carbon"}:
+            for hot_q in self.templates.get("hot_questions", []):
+                if hot_q.get("category") == "welded_vs_carbon":
+                    tpl_list = hot_q.get("templates", [])
+                    if tpl_list:
+                        import random as _rand
+                        answer = self._render(_rand.choice(tpl_list))
+                        return "material/compare_welded_carbon", answer
+
+        # 其他组合 → 暂时没有精准模板，返回None走总览兜底
+        return None
+
+    def _get_material_detail_answer(self, mat_key):
+        """获取单种板材的详情介绍"""
+        # 碳脂板 → 用carbon_detail模板
+        if mat_key == "carbon":
+            for hot_q in self.templates.get("hot_questions", []):
+                if hot_q.get("category") == "carbon_detail":
+                    tpl_list = hot_q.get("templates", [])
+                    if tpl_list:
+                        import random as _rand
+                        answer = self._render(_rand.choice(tpl_list))
+                        return "material/detail_carbon", answer
+
+        # 其他板材 → 暂时返回None，走原有关键词匹配或知识库
+        return None
+
     def _match_hot_question(self, text):
         """
         关键词命中就返回（分类标签, 渲染好的话术），否则返回 None
         跳过工艺类问题（有 process_key 的）和议价专属模板（bargain_only）
         匹配度最高优先（匹配关键词数多的优先，相同则关键词总长度长的优先）
         """
+        # ===== 指代词 + 上下文板材 智能匹配 =====
+        # 用户说"这两种有什么区别"时，结合上一轮提到的板材来判断
+        pronoun_result = self._resolve_pronoun_material_compare(text)
+        if pronoun_result is not None:
+            return pronoun_result
+
         best_match = None
         best_count = 0
         best_len = 0
