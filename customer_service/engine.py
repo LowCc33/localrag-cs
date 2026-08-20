@@ -1498,19 +1498,39 @@ class CustomerServiceEngine:
 
         # 关键词级别的属性补全（室外/户外/儿童等常见修饰词）
         # ponytail: 不管走不走LLM兜底，先把明显的属性用关键词标上，避免漏标
-        outdoor_keywords_text = ["室外", "户外", "露天", "风吹雨淋"]
-        has_outdoor_text = any(kw in text for kw in outdoor_keywords_text)
-        kids_keywords_text = ["孩子用", "小孩用", "宝宝用", "儿童用", "小孩房", "儿童房"]
-        has_kids_text = any(kw in text for kw in kids_keywords_text)
+        # 注意：不能给所有场景都加属性，只有修饰词直接关联的场景才加
+        outdoor_prefixes = ["室外", "户外", "露天"]
+        kids_prefixes = ["小孩房", "儿童房", "孩子的", "小孩的"]
 
-        if has_outdoor_text:
-            for r in results:
-                if "outdoor" not in r["attributes"]:
-                    r["attributes"].append("outdoor")
-        if has_kids_text:
-            for r in results:
-                if r["scene_key"] == "kids_room" and "kids" not in r["attributes"]:
+        # 遍历每个场景，检查原文中是否有"室外+场景名"这样的搭配
+        for r in results:
+            scene_name = r["scene_name"]
+            scene_key = r["scene_key"]
+
+            # outdoor: 检查是否有"室外+场景名"或"场景名+室外"的搭配
+            for prefix in outdoor_prefixes:
+                if prefix + scene_name in text or scene_name + prefix in text:
+                    if "outdoor" not in r["attributes"]:
+                        r["attributes"].append("outdoor")
+                    break
+            # 特殊："阳台"场景，如果有"户外""露天"等直接修饰，也算室外
+            if scene_key == "balcony":
+                for prefix in outdoor_prefixes:
+                    if prefix in text:
+                        if "outdoor" not in r["attributes"]:
+                            r["attributes"].append("outdoor")
+                        break
+
+            # kids: 检查是否有"小孩+场景"或场景是kids_room且文本有儿童相关词
+            if scene_key == "kids_room":
+                if "kids" not in r["attributes"]:
                     r["attributes"].append("kids")
+            else:
+                for prefix in kids_prefixes:
+                    if prefix + scene_name in text:
+                        if "kids" not in r["attributes"]:
+                            r["attributes"].append("kids")
+                        break
 
         # 关键词命中 >=3个 → 直接返回，不调LLM（够多了，省时间）
         if len(results) >= 3:
