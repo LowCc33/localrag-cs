@@ -25,6 +25,12 @@ _pricing:
 
 _base_price_method: 投影面积
 
+# 厨房/橱柜专用计价（延米 + 台面另算）
+_kitchen_pricing:
+  price_method: 延米
+  countertop_material: 石英石台面
+  countertop_price: 680  # 元/延米
+
 # ==================== 产品/工艺硬参数 ====================
 board_brand: 兔宝宝颗粒板ENF级   # 板材
 edge_band: PUR封边              # 封边工艺

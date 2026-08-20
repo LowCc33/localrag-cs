@@ -207,10 +207,13 @@ async def welcome(shop_id: str = None):
     shop_name = config.get("shop_name", "佳美全屋定制")
     boss_name = config.get("boss_name", "王师傅")
 
-    # 取老板的姓（取第一个字）
-    boss_last_name = boss_name[0] if boss_name else "王"
+    # 客服称呼：优先用配置里的customer_service_name，没有就用"小+老板姓"
+    service_name = config.get("customer_service_name", "")
+    if not service_name:
+        boss_last_name = boss_name[0] if boss_name else "王"
+        service_name = f"小{boss_last_name}"
 
-    welcome_text = f"您好！我是{shop_name}的客服小{boss_last_name}，很高兴为您服务。请问您是想咨询柜子定制吗？😊"
+    welcome_text = f"您好！我是{shop_name}的客服{service_name}，很高兴为您服务。请问您是想咨询柜子定制吗？😊"
 
     # 快捷问题
     quick_questions = [
@@ -223,6 +226,7 @@ async def welcome(shop_id: str = None):
     return JSONResponse(content={
         "shop_name": shop_name,
         "boss_name": boss_name,
+        "service_name": service_name,
         "welcome_text": welcome_text,
         "quick_questions": quick_questions,
     })
