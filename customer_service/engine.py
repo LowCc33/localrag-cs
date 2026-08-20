@@ -1377,13 +1377,14 @@ class CustomerServiceEngine:
         优先级高的在前（比如"儿童衣柜"应该命中儿童房而不是卧室）
         """
         # 按优先级排序（更具体的场景放前面）
+        # ponytail: 12个场景key必须和推荐矩阵完全一致（weimusi_recommend_matrix.json）
         room_patterns = [
+            ("whole_house", [
+                "全屋定制", "全屋", "整套", "整体", "全套", "整屋", "家里全部",
+            ]),
             ("kids_room", [
                 "儿童房", "小孩房", "宝宝房", "孩子房间", "儿童衣柜", "孩子用",
                 "儿童", "小孩", "宝宝", "儿子房", "女儿房",
-            ]),
-            ("tatami", [
-                "榻榻米", "地台", "踏踏米", "做榻榻米", "书房",
             ]),
             ("kitchen", [
                 "厨房", "橱柜", "厨柜", "厨房柜子", "灶台", "吊柜",
@@ -1394,24 +1395,34 @@ class CustomerServiceEngine:
             ("balcony", [
                 "阳台", "阳台柜", "洗衣柜", "洗衣机柜", "晾衣架",
             ]),
+            ("basement", [
+                "地下室", "室外储物柜", "户外柜", "室外柜", "地下室储物柜",
+                "露台柜", "庭院柜",
+            ]),
+            ("tv_cabinet", [
+                "电视柜", "电视背景墙", "背景墙柜", "影视墙",
+            ]),
+            ("dining", [
+                "餐边柜", "酒柜", "餐厅柜", "茶水柜", "餐厅酒柜",
+            ]),
+            ("bookcase", [
+                "书柜", "书架", "展示柜", "陈列柜", "文件柜",
+            ]),
             ("shoe_cabinet", [
-                "鞋柜", "玄关", "入户", "门厅", "玄关柜", "酒柜", "门厅柜", "入户柜",
+                "鞋柜", "门厅柜", "入户柜",
             ]),
-            ("living_room", [
-                "客厅", "电视柜", "餐边柜", "背景墙",
+            ("entrance", [
+                "玄关柜", "玄关", "入户玄关",
             ]),
-            ("whole_house", [
-                "全屋", "整套", "整体", "全套", "家里", "整屋",
-            ]),
-            ("bedroom_wardrobe", [
+            ("wardrobe", [
                 "卧室", "主卧", "次卧", "衣柜", "大衣柜", "衣帽间",
-                "大衣橱", "衣橱",
+                "大衣橱", "衣橱", "卧室衣柜", "主卧衣柜", "次卧衣柜",
             ]),
         ]
 
         for room_key, keywords in room_patterns:
             if any(kw in text for kw in keywords):
-                scene_name = self.rec_matrix.get("scene_names", {}).get(room_key, room_key)
+                scene_name = self._get_scene_name(room_key)
                 return room_key, scene_name
         return None, None
 
@@ -1423,13 +1434,15 @@ class CustomerServiceEngine:
         - 数量上限：4个（太多了话术太长）
         - 全屋优先：如果命中了 whole_house，直接返回全屋单个场景（不拆）
         """
+        # ponytail: 12个场景key必须和推荐矩阵完全一致（weimusi_recommend_matrix.json）
+        # 顺序：全屋优先 > 儿童房 > 厨卫阳台 > 具体柜子 > 鞋柜玄关 > 衣柜
         room_patterns = [
+            ("whole_house", [
+                "全屋定制", "全屋", "整套", "整体", "全套", "整屋", "家里全部",
+            ]),
             ("kids_room", [
                 "儿童房", "小孩房", "宝宝房", "孩子房间", "儿童衣柜", "孩子用",
                 "儿童", "小孩", "宝宝", "儿子房", "女儿房",
-            ]),
-            ("tatami", [
-                "榻榻米", "地台", "踏踏米", "做榻榻米", "书房",
             ]),
             ("kitchen", [
                 "厨房", "橱柜", "厨柜", "厨房柜子", "灶台", "吊柜",
@@ -1440,18 +1453,28 @@ class CustomerServiceEngine:
             ("balcony", [
                 "阳台", "阳台柜", "洗衣柜", "洗衣机柜", "晾衣架",
             ]),
+            ("basement", [
+                "地下室", "室外储物柜", "户外柜", "室外柜", "地下室储物柜",
+                "露台柜", "庭院柜",
+            ]),
+            ("tv_cabinet", [
+                "电视柜", "电视背景墙", "背景墙柜", "影视墙",
+            ]),
+            ("dining", [
+                "餐边柜", "酒柜", "餐厅柜", "茶水柜", "餐厅酒柜",
+            ]),
+            ("bookcase", [
+                "书柜", "书架", "展示柜", "陈列柜", "文件柜",
+            ]),
             ("shoe_cabinet", [
-                "鞋柜", "玄关", "入户", "门厅", "玄关柜", "酒柜", "门厅柜", "入户柜",
+                "鞋柜", "门厅柜", "入户柜",
             ]),
-            ("living_room", [
-                "客厅", "电视柜", "餐边柜", "背景墙",
+            ("entrance", [
+                "玄关柜", "玄关", "入户玄关",
             ]),
-            ("whole_house", [
-                "全屋", "整套", "整体", "全套", "家里", "整屋",
-            ]),
-            ("bedroom_wardrobe", [
+            ("wardrobe", [
                 "卧室", "主卧", "次卧", "衣柜", "大衣柜", "衣帽间",
-                "大衣橱", "衣橱",
+                "大衣橱", "衣橱", "卧室衣柜", "主卧衣柜", "次卧衣柜",
             ]),
         ]
 
@@ -1462,13 +1485,13 @@ class CustomerServiceEngine:
             if any(kw in text for kw in keywords):
                 # 全屋优先，命中了就直接返回单个全屋
                 if room_key == "whole_house":
-                    scene_name = self.rec_matrix.get("scene_names", {}).get(room_key, room_key)
+                    scene_name = self._get_scene_name(room_key)
                     return [(room_key, scene_name)]
                 if room_key not in seen_keys:
-                    scene_name = self.rec_matrix.get("scene_names", {}).get(room_key, room_key)
+                    scene_name = self._get_scene_name(room_key)
                     results.append((room_key, scene_name))
                     seen_keys.add(room_key)
-                    if len(results) >= 4:
+                    if len(results) >= 10:
                         break
 
         return results
@@ -1502,6 +1525,11 @@ class CustomerServiceEngine:
         outdoor_prefixes = ["室外", "户外", "露天"]
         kids_prefixes = ["小孩房", "儿童房", "孩子的", "小孩的"]
 
+        # basement（地下室/室外储物柜）默认带outdoor属性（本身就是室外场景）
+        for r in results:
+            if r["scene_key"] == "basement" and "outdoor" not in r["attributes"]:
+                r["attributes"].append("outdoor")
+
         # 遍历每个场景，检查原文中是否有"室外+场景名"这样的搭配
         for r in results:
             scene_name = r["scene_name"]
@@ -1534,7 +1562,7 @@ class CustomerServiceEngine:
 
         # 关键词命中 >=3个 → 直接返回，不调LLM（够多了，省时间）
         if len(results) >= 3:
-            return results[:4]
+            return results[:10]
 
         # 第二层：LLM语义兜底（补全漏识别的场景 + 识别属性）
         scene_prompt = """你是一个全屋定制客服的场景识别器。根据用户说的话，识别出提到的所有家具使用场景，以及每个场景的特殊属性。
@@ -1603,10 +1631,10 @@ class CustomerServiceEngine:
                         attrs = [a for a in item.get("attributes", []) if a in valid_attrs]
                         # 全屋优先
                         if sk == "whole_house":
-                            scene_name = self.rec_matrix.get("scene_names", {}).get(sk, sk)
+                            scene_name = self._get_scene_name(sk)
                             return [{"scene_key": sk, "scene_name": scene_name, "attributes": attrs}]
                         if sk not in seen_keys:
-                            scene_name = self.rec_matrix.get("scene_names", {}).get(sk, sk)
+                            scene_name = self._get_scene_name(sk)
                             results.append({
                                 "scene_key": sk,
                                 "scene_name": scene_name,
@@ -1803,7 +1831,9 @@ class CustomerServiceEngine:
         # 默认场景：default（通用推荐，不脑补具体房间）
         if not scene_key:
             scene_key = "default"
-            scene_name = self.rec_matrix.get("scene_names", {}).get(scene_key, "通用")
+            scene_name = self._get_scene_name(scene_key)
+            if scene_name == "default":
+                scene_name = "通用"
 
         # 默认偏好：recommend_me（用户让我们推荐）
         if not preference:
@@ -1843,21 +1873,39 @@ class CustomerServiceEngine:
 
     # ---------- 私有推荐矩阵（全铝风格）----------
     # 引擎场景key → 私有矩阵场景key 的映射
+    # ponytail: 现在引擎的12个scene_key和矩阵完全一致，大部分是1:1映射
     PRIVATE_SCENE_MAP = {
         "kitchen": "kitchen",
         "bathroom": "bathroom",
         "balcony": "balcony",
+        "basement": "basement",
+        "tv_cabinet": "tv_cabinet",
+        "dining": "dining",
+        "bookcase": "bookcase",
         "shoe_cabinet": "shoe_cabinet",
+        "entrance": "entrance",
+        "wardrobe": "wardrobe",
         "kids_room": "kids_room",
         "whole_house": "whole_house",
-        "bedroom_wardrobe": "wardrobe",
-        "living_room": "tv_cabinet",  # 客厅主要命中电视柜
-        "tatami": None,  # 私有矩阵没有榻榻米，走默认
     }
 
     def _map_to_private_scene(self, scene_key):
         """把引擎场景key映射到私有矩阵场景key，映射不到返回None"""
         return self.PRIVATE_SCENE_MAP.get(scene_key)
+
+    def _get_scene_name(self, scene_key):
+        """
+        获取场景中文名，优先从私有矩阵取，其次从公用矩阵取
+        确保场景名和推荐矩阵一致，不会出现key当名字用的情况
+        """
+        # 优先从私有矩阵的scenes配置里取（最准确，和矩阵一致）
+        if self.private_rec_matrix:
+            scenes = self.private_rec_matrix.get("scenes", {})
+            for scene_name, cfg in scenes.items():
+                if cfg.get("scene_key") == scene_key:
+                    return scene_name
+        # 兜底：从公用rec_matrix取
+        return self.rec_matrix.get("scene_names", {}).get(scene_key, scene_key)
 
     def _get_private_scene_config(self, scene_key):
         """从私有矩阵里拿到指定场景的配置，拿不到返回(None, None)"""
