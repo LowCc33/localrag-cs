@@ -478,8 +478,13 @@ class CustomerServiceEngine:
         # === 明确2种型 ===
         if pronoun_type == "exact_two":
             if num_context == 2:
-                # 正好2种 → 精准对比
-                return self._render_material_compare_for(context_materials)
+                # 正好2种 → 先尝试精准对比
+                result = self._render_material_compare_for(context_materials)
+                if result:
+                    return result
+                # 有2种但没有专门的对比模板 → 反问确认，别瞎答
+                reply = "您说的是哪两种板材呀？我们有SPC蜂窝板、全铝蜂窝板、焊接大板和碳脂板四种，您指的是哪两种的对比？"
+                return "material/pronoun_clarify", reply
             else:
                 # 不是正好2种 → 反问，别瞎猜
                 reply = "您说的是哪两种板材呀？我们有SPC蜂窝板、全铝蜂窝板、焊接大板和碳脂板四种，您指的是哪两种的对比？"
@@ -4959,8 +4964,14 @@ class CustomerServiceEngine:
             pref_type = self._detect_preference_type(text)
             room_types = self._detect_room_types(text)
             if pref_type or room_types:
-                # 误判防护：纯疑问句且无选择信号 → 不触发推荐（如"环保吗""品质怎么样"）
-                pure_question_keywords = ["吗", "呢", "怎么", "怎样", "如何", "行不行", "好不好", "怎么样"]
+                # 误判防护：纯疑问句且无选择信号 → 不触发推荐（如"环保吗""品质怎么样""有什么区别"）
+                # ponytail: 疑问词不仅是吗/呢/怎么，还包括板材对比类（区别/哪个好/对比），
+                # 否则"这两种板有什么区别"会被当成偏好信号触发推荐，完全跑偏
+                pure_question_keywords = [
+                    "吗", "呢", "怎么", "怎样", "如何", "行不行", "好不好", "怎么样",
+                    "区别", "哪个好", "对比", "差别", "不一样", "优缺点", "有啥区别",
+                    "什么区别", "哪种好", "选哪种", "有什么不同", "有啥不同",
+                ]
                 choice_signal_keywords = ["要", "选", "用", "想要", "给我来", "来个", "就要", "就用", "就选", "做", "你推荐"]
                 is_pure_question = any(kw in text for kw in pure_question_keywords)
                 has_choice_signal = any(kw in text for kw in choice_signal_keywords)
