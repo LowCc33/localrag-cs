@@ -1492,9 +1492,25 @@ class CustomerServiceEngine:
             results.append({
                 "scene_key": scene_key,
                 "scene_name": scene_name,
-                "attributes": [],  # 关键词匹配暂时不给属性，交给LLM补
+                "attributes": [],  # 先置空，下面统一补全
             })
             seen_keys.add(scene_key)
+
+        # 关键词级别的属性补全（室外/户外/儿童等常见修饰词）
+        # ponytail: 不管走不走LLM兜底，先把明显的属性用关键词标上，避免漏标
+        outdoor_keywords_text = ["室外", "户外", "露天", "风吹雨淋"]
+        has_outdoor_text = any(kw in text for kw in outdoor_keywords_text)
+        kids_keywords_text = ["孩子用", "小孩用", "宝宝用", "儿童用", "小孩房", "儿童房"]
+        has_kids_text = any(kw in text for kw in kids_keywords_text)
+
+        if has_outdoor_text:
+            for r in results:
+                if "outdoor" not in r["attributes"]:
+                    r["attributes"].append("outdoor")
+        if has_kids_text:
+            for r in results:
+                if r["scene_key"] == "kids_room" and "kids" not in r["attributes"]:
+                    r["attributes"].append("kids")
 
         # 关键词命中 >=3个 → 直接返回，不调LLM（够多了，省时间）
         if len(results) >= 3:
@@ -1903,6 +1919,51 @@ class CustomerServiceEngine:
             return main_push, reason
         return None, ""
 
+    def _pick_private_material_v2(self, scene_cfg, preference, is_outdoor=False):
+        """
+        私有矩阵多档推荐（用于品质偏好下的两档方案）
+        返回：list of dict，按推荐优先级排序
+        [
+            {"material": "welded", "level": "main", "reason": "..."},
+            {"material": "carbon", "level": "upgrade", "reason": "..."},
+        ]
+        level: main（主力推荐）/ upgrade（升级推荐）
+        
+        注意：室外场景（is_outdoor=True）不能升级碳脂板，只返回main一档
+        """
+        if not scene_cfg:
+            return []
+
+        main_push = scene_cfg.get("main_push")
+        reason = scene_cfg.get("reason", "")
+        mats = self.private_rec_matrix.get("meta", {}).get("materials", {})
+
+        result = []
+
+        # 主力档：主推款（所有场景都有）
+        if main_push:
+            main_name = mats.get(main_push, {}).get("name", main_push)
+            result.append({
+                "material": main_push,
+                "material_name": main_name,
+                "level": "main",
+                "reason": reason,
+            })
+
+        # 升级档：品质偏好 + 非室外 + 碳脂板在recommend级以上
+        if preference == "quality" and not is_outdoor:
+            carbon_level = scene_cfg.get("carbon", "not_recommend")
+            if carbon_level in ("strong_recommend", "recommend"):
+                carbon_name = mats.get("carbon", {}).get("name", "碳脂板")
+                result.append({
+                    "material": "carbon",
+                    "material_name": carbon_name,
+                    "level": "upgrade",
+                    "reason": "颜值更高，质感更好，追求品质的客户首选",
+                })
+
+        return result
+
     def _get_private_recommendation(self, text):
         """
         私有矩阵单场景推荐入口
@@ -2162,6 +2223,90 @@ class CustomerServiceEngine:
 
         return answer + follow_up
 
+    def _build_multi_scene_quality_answer(self, scene_data_list):
+        """
+        品质偏好多场景两档推荐话术生成
+        第一档：全铝焊接大板（主力款）— 所有场景都能用
+        第二档：碳脂板（升级款）— 室内场景可以升级
+        混搭建议：橱柜/浴室柜/阳台柜等潮湿场景可以柜体焊接大板+柜门碳脂板
+        室外场景：只能用焊接大板，明确说明不能用碳脂板
+        """
+        if not scene_data_list:
+            return ""
+
+        mats = self.private_rec_matrix.get("meta", {}).get("materials", {}) if self.private_rec_matrix else {}
+        welded_name = mats.get("welded", {}).get("name", "全铝焊接大板")
+        welded_price = mats.get("welded", {}).get("price", "980")
+        carbon_name = mats.get("carbon", {}).get("name", "碳脂板")
+        carbon_price = mats.get("carbon", {}).get("price", "1180")
+
+        # 分类：室外场景 / 可升级室内场景 / 不可升级室内场景
+        outdoor_scenes = []  # 室外，只能焊接大板
+        upgrade_scenes = []  # 可升级碳脂板的室内场景
+        main_only_scenes = []  # 只能用焊接大板的室内场景（碳脂板不推荐）
+
+        # 先查每个场景的碳脂板推荐级别
+        for s in scene_data_list:
+            attrs = s.get("attributes", [])
+            is_outdoor = "outdoor" in attrs
+            scene_cfg, _ = self._get_private_scene_config(s["scene_key"])
+            carbon_level = "not_recommend"
+            if scene_cfg:
+                carbon_level = scene_cfg.get("carbon", "not_recommend")
+            can_upgrade = carbon_level in ("strong_recommend", "recommend")
+
+            scene_info = {
+                "key": s["scene_key"],
+                "name": s["scene_name"],
+                "reason": s.get("reason", ""),
+            }
+
+            if is_outdoor:
+                outdoor_scenes.append(scene_info)
+            elif can_upgrade:
+                upgrade_scenes.append(scene_info)
+            else:
+                main_only_scenes.append(scene_info)
+
+        lines = []
+
+        # === 开头 ===
+        lines.append("追求品质的话，我给您说两个档次的选择：")
+
+        # === 第一档：主力款 焊接大板 ===
+        # 汇总所有场景名（焊接大板是所有场景都能用的）
+        all_scene_names = [s["name"] for s in outdoor_scenes + upgrade_scenes + main_only_scenes]
+        main_scene_text = "、".join(all_scene_names)
+        lines.append(f"· 【{welded_name}】{welded_price}一平：{main_scene_text}都能用，结实耐用防潮，是我们卖得最多的款，口碑也最好。")
+
+        # 室外场景强调
+        if outdoor_scenes:
+            outdoor_names = "、".join([s["name"] for s in outdoor_scenes])
+            lines.append(f"  特别是{outdoor_names}，风吹雨淋的，只能用{welded_name}才扛得住，不建议用{carbon_name}，日晒容易老化。")
+
+        # === 第二档：升级款 碳脂板 ===
+        if upgrade_scenes:
+            upgrade_names = "、".join([s["name"] for s in upgrade_scenes])
+            lines.append(f"· 【{carbon_name}】{carbon_price}一平：预算够的话，{upgrade_names}可以用这个升级，颜值更高，质感更好。")
+
+        # === 混搭建议（如果有厨房/浴室/阳台等潮湿场景） ===
+        wet_scenes = []
+        for s in scene_data_list:
+            attrs = s.get("attributes", [])
+            scene_key = s["scene_key"]
+            # 厨房、浴室、阳台属于潮湿场景，可以混搭
+            if scene_key in ("kitchen", "bathroom", "balcony") or "wet" in attrs:
+                wet_scenes.append(s["scene_name"])
+
+        if wet_scenes:
+            wet_text = "、".join(wet_scenes)
+            lines.append(f"  像{wet_text}这些地方，很多客户是柜体用{welded_name}+柜门用{carbon_name}混搭，既防潮耐造又有颜值，性价比也不错。")
+
+        # === 结尾跟进 ===
+        lines.append("您看这个搭配可以不？大概做多大面积？")
+
+        return "\n".join(lines)
+
     def _get_generic_reason(self, material_name, scene_data_list):
         """
         给同组板材生成一个通用理由（多个场景共用时）
@@ -2248,13 +2393,29 @@ class CustomerServiceEngine:
         # 4. 生成话术
         has_selected = selected_material is not None
         has_upgrade = any(not s["is_same_as_selected"] for s in scenes)
-        answer = self._build_multi_scene_answer(scenes, has_selected)
+
+        # 品质偏好 → 走两档方案话术
+        if preference == "quality" and self.private_rec_matrix and not has_selected:
+            answer = self._build_multi_scene_quality_answer(scenes)
+            # 品质偏好下，主材料取焊接大板（主力推荐档，不是升级档）
+            # 找到第一个有main_push的场景，取它的main_push作为selected_material
+            first_main_mat = "welded"  # 默认焊接大板
+            for s in scenes:
+                scene_cfg, _ = self._get_private_scene_config(s["scene_key"])
+                if scene_cfg and scene_cfg.get("main_push"):
+                    first_main_mat = scene_cfg["main_push"]
+                    break
+            main_material = first_main_mat
+        else:
+            answer = self._build_multi_scene_answer(scenes, has_selected)
+            main_material = scenes[0]["recommended_material"] if scenes else None
 
         return {
             "scenes": scenes,
             "has_upgrade": has_upgrade,
             "answer": answer,
             "follow_up": "您这些柜子加起来大概多大？",
+            "main_material": main_material,
         }
 
     # ---------- 议价状态机：嫌贵/竞品 回怼检测 ----------
@@ -3963,9 +4124,9 @@ class CustomerServiceEngine:
                 multi_rec = self._multi_scene_recommendation(text, preference=pref_type)
                 if multi_rec and multi_rec.get("answer"):
                     # 多场景推荐成功 → 直接用返回的话术
-                    # selected_material 取第一个场景的主推材料
+                    # selected_material 取主材料（品质偏好下是主力档焊接大板，不是升级档）
                     scenes = multi_rec.get("scenes", [])
-                    first_mat = scenes[0]["recommended_material"] if scenes else None
+                    first_mat = multi_rec.get("main_material") or (scenes[0]["recommended_material"] if scenes else None)
                     reply = multi_rec["answer"]
                     # 加一句过渡开头，让话术更自然
                     reply = "根据您的情况，我给您分别说一下：\n" + reply
