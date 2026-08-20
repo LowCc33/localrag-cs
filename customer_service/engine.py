@@ -5106,6 +5106,7 @@ class CustomerServiceEngine:
 
             # 正常做事实问题预检查
             fact_answer = None
+            fact_category = None  # 记录事实问题分类，用于判断是否需要加拉回尾巴
             # 1) 关键词匹配hot_questions（已经自动跳过bargain_only和工艺类）
             hot_result = self._match_hot_question(text)
             if hot_result:
@@ -5113,6 +5114,7 @@ class CustomerServiceEngine:
                 # 排除材料推荐类问题（material_recommend_xxx），这些应该走议价推荐矩阵
                 if "material_recommend" not in hot_tag:
                     fact_answer = hot_answer
+                    fact_category = hot_tag
             # 2) 工艺匹配
             if not fact_answer:
                 process_match = self._match_process_by_keywords(text)
@@ -5132,7 +5134,12 @@ class CustomerServiceEngine:
         # 命中事实问题 → 先回答，再追加议价拉回话术，状态不推进
         if fact_answer:
             follow_up = self._get_bargain_follow_up()
-            full_answer = fact_answer + "\n" + follow_up
+            # ponytail: 指代词反问类回答不需要加拉回尾巴
+            # 比如"您说的是哪两种板材呀？"后面再加"什么时候量房"很奇怪
+            if fact_category and "pronoun_clarify" in fact_category:
+                full_answer = fact_answer
+            else:
+                full_answer = fact_answer + "\n" + follow_up
             return "bargain/answer_detail", full_answer
 
         # 然后才调用 LLM 决策
