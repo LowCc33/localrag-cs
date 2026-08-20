@@ -567,7 +567,36 @@ class CustomerServiceEngine:
         import re
 
         # 1. 面积检测（最高优先级）：精确值 + 模糊范围，按匹配优先级从高到低
-        # 支持：精确数字 / 7-8平 / 7 8个平 / 七八平 / 十来个平方 等
+        # 支持：精确数字 / 7-8平 / 7 8个平 / 七八平 / 十来个平方 / 20多平 / 30来平 等
+
+        # 投影面积检测：文本中出现投影相关词汇 → 按投影面积×2.5换算成展开面积
+        # ponytail: 投影是用户习惯说法，实际计价都是按展开面积
+        projection_keywords = ["投影", "投影面积", "按投影算", "按投影", "投影算"]
+        has_projection = any(kw in text for kw in projection_keywords)
+        projection_ratio = 2.5  # 投影转展开的系数
+
+        def _area_to_size(area, raw):
+            """辅助函数：面积数值→分档 + 返回三元组
+            分档（按展开面积）：
+            - small: <15平
+            - medium: 15-30平
+            - large: 30-50平
+            - xlarge: ≥50平
+            """
+            if has_projection:
+                real_area = area * projection_ratio
+                raw_display = f"投影{raw}平(展开约{real_area:.0f}平)"
+            else:
+                real_area = area
+                raw_display = raw
+            if real_area >= 50:
+                return ("xlarge", "area", raw_display)
+            elif real_area >= 30:
+                return ("large", "area", raw_display)
+            elif real_area >= 15:
+                return ("medium", "area", raw_display)
+            else:
+                return ("small", "area", raw_display)
 
         # 1.1 阿拉伯数字模糊范围（优先级高于单个数字）："7 8个平" "7-8平" "7~8个平方" 这种
         # ponytail: 两个数字之间必须有空格或分隔符，防止"10"被误拆成"1-0"
@@ -577,24 +606,18 @@ class CustomerServiceEngine:
             high = float(fuzzy_area_match.group(2))
             avg_area = (low + high) / 2
             raw_desc = f"{int(low)}-{int(high)}"
-            if avg_area >= 30:
-                return ("large", "area", raw_desc)
-            elif avg_area >= 6:
-                return ("medium", "area", raw_desc)
-            else:
-                return ("small", "area", raw_desc)
+            return _area_to_size(avg_area, raw_desc)
 
-        # 1.2 单个数字（精确值）
-        area_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:个)?\s*(?:平方|平米|平|㎡)', text)
+        # 1.2 单个数字（精确/模糊值）
+        # 支持：20平 / 20多平 / 30来平 / 15左右平 / 大概20个平方
+        area_match = re.search(r'(\d+(?:\.\d+)?)\s*(?:多|来|左右|大概)?\s*(?:个)?\s*(?:平方|平米|平|㎡)', text)
         if area_match:
             raw = area_match.group(1)
             area = float(raw)
-            if area >= 30:
-                return ("large", "area", raw)
-            elif area >= 6:
-                return ("medium", "area", raw)
-            else:
-                return ("small", "area", raw)
+            # 如果是"XX多平"，面积向上取整一点（20多平≈22平，保守估算）
+            if "多" in area_match.group(0) or "来" in area_match.group(0):
+                area = area * 1.1  # 粗略加10%
+            return _area_to_size(area, raw)
 
         # 1.3 汉字数字模糊范围："七八个平" "五六平" "十来个平方" 这种
         # ponytail: 按长度从长到短排，避免"十几"误匹配"二十几"；长字符串优先
@@ -607,12 +630,7 @@ class CustomerServiceEngine:
         for pattern, avg_val in cn_fuzzy_area_patterns:
             # 前面不是汉字数字，避免"二十几"被"十几"匹配
             if re.search(r'(?<![一二三四五六七八九十两])' + pattern + r'\s*(?:个)?\s*(?:平方|平米|平|㎡)', text):
-                if avg_val >= 30:
-                    return ("large", "area", pattern)
-                elif avg_val >= 6:
-                    return ("medium", "area", pattern)
-                else:
-                    return ("small", "area", pattern)
+                return _area_to_size(avg_val, pattern)
 
         # 2. 柜子数量检测（降级估算面积，每柜按3.5㎡换算）
         # ponytail: 柜子数量降级为面积估算，标记input_type=count，话术里带"大概"
@@ -623,9 +641,11 @@ class CustomerServiceEngine:
         if count_match:
             count_num = int(count_match.group(1))
             est_area = count_num * 3.5  # 每柜按3.5㎡估算
-            if est_area >= 30:
+            if est_area >= 50:
+                return ("xlarge", "count", count_match.group(1))
+            elif est_area >= 30:
                 return ("large", "count", count_match.group(1))
-            elif est_area >= 6:
+            elif est_area >= 15:
                 return ("medium", "count", count_match.group(1))
             else:
                 return ("small", "count", count_match.group(1))
@@ -645,9 +665,11 @@ class CustomerServiceEngine:
             if pattern in text and any(suffix in text for suffix in ["柜子", "衣柜", "鞋柜", "书柜", "酒柜", "橱柜", "个", ""]):
                 est_area = cnt_val * 3.5
                 raw_desc = pattern.replace("个", "").replace("柜子", "")
-                if est_area >= 30:
+                if est_area >= 50:
+                    return ("xlarge", "count", raw_desc)
+                elif est_area >= 30:
                     return ("large", "count", raw_desc)
-                elif est_area >= 6:
+                elif est_area >= 15:
                     return ("medium", "count", raw_desc)
                 else:
                     return ("small", "count", raw_desc)
@@ -663,46 +685,53 @@ class CustomerServiceEngine:
             count_num = cn_nums.get(num_char, 1)
             est_area = count_num * 3.5
             raw_desc = str(count_num)
-            if est_area >= 30:
+            if est_area >= 50:
+                return ("xlarge", "count", raw_desc)
+            elif est_area >= 30:
                 return ("large", "count", raw_desc)
-            elif est_area >= 6:
+            elif est_area >= 15:
                 return ("medium", "count", raw_desc)
             else:
                 return ("small", "count", raw_desc)
 
         # 关键词匹配柜子数量（无明确数字时）
+        # 按3.5平/柜估算，对应新面积分档：<15平=small, 15-30=medium, 30-50=large, ≥50=xlarge
         small_keywords = [
-            "一个柜子", "两个柜子", "就一个", "就做一个", "就衣柜",
-            "就鞋柜", "一二个", "一两个", "只做一个", "1个", "2个",
-            "就一个柜子", "单个", "一个房间"
+            "一个柜子", "两个柜子", "三个柜子", "四个柜子",
+            "就一个", "就做一个", "就衣柜", "就鞋柜",
+            "一二个", "一两个", "两三个", "三四个", "二三", "三四",
+            "只做一个", "1个", "2个", "3个", "4个",
+            "就一个柜子", "单个", "一个房间", "两个房间",
         ]
         medium_keywords = [
-            "三个柜子", "四个柜子", "五个柜子", "三四个", "四五个",
-            "几个柜子", "两三", "三四", "四五", "3个", "4个", "5个",
-            "几个", "两三个", "三四个柜子"
+            "五个柜子", "六个柜子", "七个柜子", "八个柜子",
+            "四五个", "五六", "六七", "七八", "5个", "6个", "7个", "8个",
+            "几个柜子", "三四个柜子", "四五个柜子",
         ]
-        large_keywords_count = ["六个柜子", "七个柜子", "八个柜子", "很多柜子", "十几个"]
+        large_keywords_count = ["九个柜子", "十个柜子", "很多柜子", "十几个", "十来个"]
 
         if any(kw in text for kw in large_keywords_count):
-            return ("large", "count", "六七")
+            return ("large", "count", "十几")
         if any(kw in text for kw in medium_keywords):
-            if "三四个" in text or "三四" in text:
-                return ("medium", "count", "三四")
-            elif "四五个" in text or "四五" in text:
+            if "四五个" in text or "四五" in text:
                 return ("medium", "count", "四五")
-            elif "3个" in text:
-                return ("medium", "count", "3")
-            elif "4个" in text:
-                return ("medium", "count", "4")
             elif "5个" in text:
                 return ("medium", "count", "5")
-            return ("medium", "count", "三四")
+            elif "6个" in text:
+                return ("medium", "count", "6")
+            elif "七八个" in text or "七八" in text:
+                return ("medium", "count", "七八")
+            return ("medium", "count", "五六")
         if any(kw in text for kw in small_keywords):
-            if "一个" in text or "1个" in text or "就一个" in text:
+            if "三四个" in text or "三四" in text:
+                return ("small", "count", "三四")
+            elif "两三个" in text or "二三" in text:
+                return ("small", "count", "两三")
+            elif "一个" in text or "1个" in text or "就一个" in text:
                 return ("small", "count", "1")
             elif "两个" in text or "2个" in text:
                 return ("small", "count", "2")
-            return ("small", "count", "一两")
+            return ("small", "count", "一两个")
 
         # 3. 全屋类（最低优先级，按large估算）
         whole_house_keywords = [
@@ -710,7 +739,7 @@ class CustomerServiceEngine:
             "整套房子", "全房", "所有柜子", "全部做", "全套"
         ]
         if any(kw in text for kw in whole_house_keywords):
-            return ("large", "whole_house", None)
+            return ("xlarge", "whole_house", None)
 
         return (None, None, None)
 
@@ -2554,8 +2583,9 @@ class CustomerServiceEngine:
 
         # 2. 嫌贵（贵/太贵/这么贵/好贵等，不含砍价动作）
         expensive_keywords = [
-            "太贵", "这么贵", "好贵", "有点贵", "价格高", "不便宜",
-            "真贵", "也太贵", "太贵了", "贵了点", "价钱高",
+            "太贵", "这么贵", "好贵", "有点贵", "价格高", "价格有点高",
+            "不便宜", "真贵", "也太贵", "太贵了", "贵了点", "价钱高",
+            "价钱有点高", "有点小贵",
         ]
         if any(kw in text for kw in expensive_keywords):
             return "expensive", self._render_bargain_template("bargain_value_build")
@@ -2852,16 +2882,20 @@ class CustomerServiceEngine:
         return self.collected_info.get(field) is not None
 
     def _is_bargain_question(self, text):
-        """判断是不是砍价/要优惠的问题（只有明确砍价信号才算）
-        注意：纯问价（多少钱、价格、报价）不算，归 _is_price_question 管
+        """判断是不是主动砍价/要优惠的问题（明确要优惠动作才算）
+        注意：
+        - 纯问价（多少钱、价格、报价）不算，归 _is_price_question 管
+        - 嫌贵/价格异议（太贵了、有点贵）不算，归 _detect_bargain_pushback 管
+        只有用户主动提出要优惠/打折/便宜点的，才算砍价，进入议价流程
         """
         bargain_keywords = [
-            "便宜", "优惠", "打折", "最低价", "能不能少", "砍价",
-            "再便宜点", "太贵了", "价格高", "有没有优惠", "能便宜吗",
-            "便宜点", "少点", "能不能优惠", "还能少吗", "再降点",
-            "再打个折", "再少点", "不够便宜", "还是贵", "还是高",
-            "贵不贵", "贵了", "太贵", "最低多少", "能降吗",
-            "能再便宜", "能少点吗", "便宜点呗",
+            # 明确问优惠/折扣
+            "能便宜吗", "有没有优惠", "有优惠吗", "能打折吗", "能降吗",
+            "能不能优惠", "能不能少", "还能少吗", "能少点吗", "能再便宜",
+            "最低多少", "最低价", "砍价",
+            # 明确要求便宜/少/降
+            "便宜点", "再便宜点", "少点", "再少点", "再降点", "再打个折",
+            "便宜点呗", "不够便宜", "给点优惠", "优惠点",
         ]
         return any(kw in text for kw in bargain_keywords)
 
@@ -4789,7 +4823,16 @@ class CustomerServiceEngine:
             print(f"  [确定性信号] 检测到砍价意图，跳过事实问题检查")
             fact_answer = None  # 确保不命中事实问题
         else:
-            # 没有砍价信号 → 正常做事实问题预检查
+            # 没有砍价信号 → 先检查pushback（嫌贵/竞品），命中直接返回
+            # ponytail: pushback优先级高于事实问题，避免'太贵了'被hot_questions
+            # 的'为什么别家便宜'误匹配截胡
+            pushback_result = self._detect_bargain_pushback(text)
+            if pushback_result:
+                pushback_type, pushback_ans = pushback_result
+                print(f"  [确定性信号] 命中pushback({pushback_type})，跳过事实问题检查")
+                return f"bargain/pushback/{pushback_type}", pushback_ans
+
+            # 正常做事实问题预检查
             fact_answer = None
             # 1) 关键词匹配hot_questions（已经自动跳过bargain_only和工艺类）
             hot_result = self._match_hot_question(text)

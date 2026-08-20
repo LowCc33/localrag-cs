@@ -94,21 +94,20 @@ hot_questions:
     bargain_only: true
     keywords: []
     templates:
-      - "{{material_name}}的话是{{material_price}}一平，{{price_method}}计算。标配{{hardware}}五金、{{edge_band}}封边，环保等级都是达标的，您放心。"
-      - "{{material_name}}一平{{material_price}}，按{{price_method}}算。五金用的{{hardware}}，封边是{{edge_band}}，这配置在同价位里很能打了。"
-      - "您选的{{material_name}}是{{material_price}}一平，计价方式是{{price_method}}。标配{{hardware}}，封边{{edge_band}}，您看这配置行吗？"
+      - "{{material_name}}的话是{{material_price}}{{price_unit}}，{{price_method}}计算。标配{{hardware}}五金、{{edge_band}}封边，环保等级都是达标的，您放心。{{countertop_note}}"
+      - "{{material_name}}{{price_unit}}{{material_price}}，按{{price_method}}算。五金用的{{hardware}}，封边是{{edge_band}}，这配置在同价位里很能打了。{{countertop_note}}"
+      - "您选的{{material_name}}是{{material_price}}{{price_unit}}，计价方式是{{price_method}}。标配{{hardware}}，封边{{edge_band}}，您看这配置行吗？{{countertop_note}}"
 
   # 0.2.5 推荐材料话术（系统根据偏好推荐时用，区别于用户自己选的）
+  # 注意：开头不带立场，理由由 {{recommend_reason}} 变量决定（环保/性价比/品质等）
   - category: bargain_recommend_material
     bargain_only: true
     keywords: []
     templates:
-      - "我推荐您用{{material_name}}，{{recommend_reason}}。{{material_price}}一平，{{price_method}}计价，标配{{hardware}}五金、{{edge_band}}封边，配置很扎实。"
-      - "追求性价比的话选{{material_name}}最划算，{{material_price}}一平。{{recommend_reason}}。五金{{hardware}}，封边{{edge_band}}，家用完全够。"
-      - "选{{material_name}}就挺合适的，{{material_price}}一平。{{recommend_reason}}。按{{price_method}}算，标配的五金和封边都不差。"
-      - "最便宜的是{{material_name}}，{{material_price}}一平，性价比很高，{{recommend_reason}}，普通家用完全够了。"
-      - "想要便宜的话选{{material_name}}就行，{{material_price}}一平，我们用的{{board_brand}}的板，{{recommend_reason}}，质量也不差。"
-      - "{{material_name}}最实惠，{{material_price}}一平，{{recommend_reason}}，标配{{hardware}}五金和{{edge_band}}封边，这个价位里配置算好的。"
+      - "我推荐您用{{material_name}}，{{recommend_reason}}。{{material_price}}{{price_unit}}，{{price_method}}计价，标配{{hardware}}五金、{{edge_band}}封边，配置很扎实。您看这个配置行吗？{{countertop_note}}"
+      - "选{{material_name}}就挺合适的，{{recommend_reason}}。{{material_price}}{{price_unit}}，按{{price_method}}算，标配的五金和封边都不错。您觉得呢？{{countertop_note}}"
+      - "您这种情况用{{material_name}}最合适，{{recommend_reason}}。{{material_price}}{{price_unit}}，标配{{hardware}}五金和{{edge_band}}封边，这个价位里配置算好的。{{countertop_note}}"
+      - "主推这款{{material_name}}，{{recommend_reason}}。价格是{{material_price}}{{price_unit}}，{{price_method}}计算，标配{{hardware}}五金和{{edge_band}}封边。您看可以不？{{countertop_note}}"
 
   # 0.2.6 二维推荐话术（v2新版，场景×偏好矩阵推荐用，全变量化）
   - category: bargain_recommendation_v2
@@ -124,10 +123,10 @@ hot_questions:
     bargain_only: true
     keywords: []
     templates:
-      - "{{scene_name}}也推荐{{material_name}}，{{recommend_reason}}。价格也是{{material_price}}一平，一样的{{hardware}}五金和{{edge_band}}封边。您家这些柜子加起来大概有多少投影面积？我给您算个总价。"
-      - "{{scene_name}}也用{{material_name}}就行，{{recommend_reason}}。还是{{material_price}}一平，配置不变，{{hardware}}五金+{{edge_band}}封边。您大概算过投影面积吗？"
-      - "{{scene_name}}也推荐{{material_name}}，{{recommend_reason}}。价格一样，{{material_price}}一平，标配的五金和封边都够用。您家一共要做多少平？我给您报个实价。"
-      - "{{scene_name}}也用{{material_name}}就可以，{{recommend_reason}}。还是{{material_price}}一平，整体材料统一也好看。您这些加起来大概几平？"
+      - "{{scene_name}}也推荐{{material_name}}，{{recommend_reason}}。价格也是{{material_price}}{{price_unit}}，一样的{{hardware}}五金和{{edge_band}}封边。您家这些柜子加起来大概有多少投影面积？我给您算个总价。{{countertop_note}}"
+      - "{{scene_name}}也用{{material_name}}就行，{{recommend_reason}}。还是{{material_price}}{{price_unit}}，配置不变，{{hardware}}五金+{{edge_band}}封边。您大概算过投影面积吗？{{countertop_note}}"
+      - "{{scene_name}}也推荐{{material_name}}，{{recommend_reason}}。价格一样，{{material_price}}{{price_unit}}，标配的五金和封边都够用。您家一共要做多少平？我给您报个实价。{{countertop_note}}"
+      - "{{scene_name}}也用{{material_name}}就可以，{{recommend_reason}}。还是{{material_price}}{{price_unit}}，整体材料统一也好看。您这些加起来大概几平？{{countertop_note}}"
 
   # 0.3 拉回正题话术（议价各阶段通用，按step选用）
   - category: bargain_pullback
@@ -277,6 +276,20 @@ hot_questions:
       # 6. 组合优惠套路
       - "行，{{order_desc}}我给您来个一步到位：直降两个点 + 送{{concessions}} + 五金全升级 + 免费量房设计。这力度平时想都别想，您得保密。"
 
+  # 1.4.1 超大单应对（≥50平 / 全屋大户型）：议价状态机专用
+  - category: bargain_xlarge
+    bargain_only: true
+    keywords: []
+    templates:
+      # 1. 老板亲自谈
+      - "{{order_desc}}这么大的单子，我直接给您申请老板特批价，再送5个抽屉+免费测量设计安装。全店最大力度，您加我微信{{wechat_id}}，让老板亲自跟您对接。"
+      # 2. 工程价套路
+      - "{{order_desc}}这个量，我们直接走工程批发价，还送5个抽屉+免费测量设计安装。利润很薄，但这么大的单子冲个业绩也值。您{{hook}}，详细报价单发您。"
+      # 3. 一步到位组合
+      - "这么大的单我一步到位给您报底价：工厂直供价+店长折扣+送5个抽屉+免费量房设计安装。能给的都给您了，您加我微信{{wechat_id}}，咱们约个时间上门量一下。"
+      # 4. 活动叠加套路
+      - "您赶巧了，这个月有大户型专项活动，{{order_desc}}除了工厂直供价，还能叠加店长专属折扣+送5个抽屉+免费测量安装。月底就截止，要定抓紧。"
+
   # 1.5 砍价升级：议价状态机专用
   - category: bargain_upgrade
     bargain_only: true
@@ -332,6 +345,22 @@ hot_questions:
       - "收到，您稍等，我马上安排人和您对接。"
       - "好嘞，已经记下来了，我们这边会尽快联系您的。"
       - "收到，您方便的话也可以加我微信{{wechat_id}}，我发点案例和报价单您先看看。"
+
+  # 留资成功-手机号专属（收到正确11位手机号时用，带感谢+引导问需求）
+  - category: lead_phone_success
+    keywords: []
+    templates:
+      - "好的老板，号码我记下来了，感谢信任！我这边马上安排设计师跟您对接，免费上门量房出方案。对了，您家主要做哪些柜子呀？大概多少平了解不？我先给您估个大概预算。"
+      - "收到~ 手机号已经记下了，我们{{boss_name}}会亲自跟您联系的，放心。顺便问下，您是哪个小区的呀？主要想做衣柜还是全屋定制？我好提前准备下参考案例。"
+      - "好嘞，号码存好了，我们最快今天就能联系您。对了，您这边有没有看好的板材或者风格呀？有的话可以先跟我说，我让设计师提前准备方案，省得您再跑一趟。"
+
+  # 留资-手机号格式有误提醒（位数不对/格式不对时礼貌提醒）
+  - category: lead_phone_invalid
+    keywords: []
+    templates:
+      - "不好意思，我刚才记了一下，这个号码好像少了一位？方便您再核对下不？可能是我这边看错了，您再发一遍我确认下哈。"
+      - "啊抱歉，这个手机号好像位数不太对呢，11位的手机号才打得通。您方便再检查一下重新发我吗？我怕打错打扰到别人。"
+      - "收到~ 不过这个号码我存的时候发现有点问题，可能您少写了一位？麻烦您再发一遍完整的11位手机号呗，我好及时联系您。"
 
   # 1.8 材料对比话术（LLM路由 material_compare 专用）
   - category: material_compare
@@ -390,7 +419,7 @@ hot_questions:
       - 卫浴柜什么板
       - 洗衣柜板材
     templates:
-      - "卫生间和阳台常年有水汽，材料一定要选防潮的。预算够的话用蜂窝铝最好，全铝的不怕水不发霉，就是价格高一些。预算有限就用多层板，比颗粒板防潮很多，用个五六年没问题。颜色选浅灰、白色这些清爽的，显得干净。多层板是1099一平。"
+      - "卫生间和阳台常年有水汽，材料一定要选防潮的。预算够的话用蜂窝铝最好，全铝的不怕水不发霉，就是价格高一些。预算有限就用多层板，比颗粒板防潮很多，用个五六年没问题。颜色选浅灰、白色这些清爽的，显得干净。多层板是1099一平。您家卫生间大概多大？我给您算下。"
 
   - category: material_recommend_bedroom
     keywords:
@@ -415,7 +444,7 @@ hot_questions:
       - 酒柜
       - 门厅柜
     templates:
-      - "鞋柜、餐边柜这些地方不像厨房卫生间那么潮，也不像卧室天天待，用颗粒板就足够了，性价比最高，799一平很划算。颜色主要跟您家装修风格搭就行，现代简约选白色灰色，中式选胡桃木色，北欧选浅木纹。"
+      - "鞋柜、餐边柜这些地方不像厨房卫生间那么潮，也不像卧室天天待，用颗粒板就足够了，性价比最高，799一平很划算。颜色主要跟您家装修风格搭就行，现代简约选白色灰色，中式选胡桃木色，北欧选浅木纹。您鞋柜大概做多大？我给您报个价。"
 
   - category: material_recommend_tatami
     keywords:
@@ -428,7 +457,7 @@ hot_questions:
       - 地台用什么板
       - 书房用什么板
     templates:
-      - "榻榻米我推荐生态板或者多层板。榻榻米经常要坐人放东西，承重要求高，生态板和多层板都是实木结构，承重力比颗粒板好很多，不容易压变形。而且榻榻米一般在卧室或者书房，环保也很重要。颜色选浅木纹的最耐看，也显得空间大。生态板1199一平，多层板1099一平。"
+      - "榻榻米我推荐生态板或者多层板。榻榻米经常要坐人放东西，承重要求高，生态板和多层板都是实木结构，承重力比颗粒板好很多，不容易压变形。而且榻榻米一般在卧室或者书房，环保也很重要。颜色选浅木纹的最耐看，也显得空间大。生态板1199一平，多层板1099一平。大概做几个平方？我给您算个总价。"
 
 
   # 1.9 量房/设计相关（LLM路由 measurement_design 专用）

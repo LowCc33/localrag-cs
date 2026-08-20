@@ -128,6 +128,7 @@ def _convert_json_to_engine_config(json_cfg: dict) -> dict:
         # === 店铺基础信息 ===
         "shop_name": basic.get("shop_name", ""),
         "boss_name": basic.get("boss_name", ""),
+        "customer_service_name": basic.get("customer_service_name", ""),  # 客服称呼，如"小维"，空则自动生成
         "years_in_business": basic.get("years_in_business", 0),
         "city": basic.get("city", ""),
         "shop_location": basic.get("shop_location", ""),
@@ -359,15 +360,25 @@ def convert_processes_to_templates(processes: list) -> list:
 
 
 def get_material_name(material_key: str, config: dict = None) -> str:
-    """材料key转中文名，从配置的动态映射里取"""
+    """材料key转中文名，从配置的动态映射里取
+    支持短名（如'welded'）和全名（如'aluminum_welded'）
+    """
     if config:
         name_map = config.get("_board_name_map", {})
+        # 精确匹配
         if material_key in name_map:
             return name_map[material_key]
+        # 短名降级匹配
+        for full_key, name in name_map.items():
+            if material_key in full_key:
+                return name
         # 兼容旧字段 board_names
         board_names = config.get("board_names", {})
         if material_key in board_names:
             return board_names[material_key]
+        for full_key, name in board_names.items():
+            if material_key in full_key:
+                return name
     return material_key
 
 
@@ -410,9 +421,18 @@ def get_materials_list_text(config: dict) -> str:
 
 
 def get_material_price(config: dict, material_key: str) -> int:
-    """获取指定材料的价格（从动态映射读取）"""
+    """获取指定材料的价格（从动态映射读取）
+    支持短名（如'welded'）和全名（如'aluminum_welded'）
+    """
     price_map = config.get("_board_price_map", {})
-    return price_map.get(material_key, 0)
+    # 精确匹配
+    if material_key in price_map:
+        return price_map[material_key]
+    # 短名降级匹配（如'welded'匹配'aluminum_welded'）
+    for full_key, price in price_map.items():
+        if material_key in full_key:
+            return price
+    return 0
 
 
 def format_shop_info_text(shop_id: str = None) -> str:
