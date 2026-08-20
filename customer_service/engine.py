@@ -3759,12 +3759,12 @@ class CustomerServiceEngine:
                         if tpl_list:
                             answer = Template(random.choice(tpl_list)).render(**self._vars())
                             self.history.append({"user": text, "bot": answer})
-                            self.history = self.history[-3:]
+                            self.history = self.history[-20:]
                             return "lead_phone_invalid", answer
                 # 兜底
                 answer = "不好意思，这个手机号好像位数不对呢，您方便再核对下发我一下吗？"
                 self.history.append({"user": text, "bot": answer})
-                self.history = self.history[-3:]
+                self.history = self.history[-20:]
                 return "lead_phone_invalid", answer
 
             # 正确手机号 → 专属感谢话术 + 引导需求
@@ -3775,7 +3775,7 @@ class CustomerServiceEngine:
                         if tpl_list:
                             answer = Template(random.choice(tpl_list)).render(**self._vars())
                             self.history.append({"user": text, "bot": answer})
-                            self.history = self.history[-3:]
+                            self.history = self.history[-20:]
                             return "lead_capture/phone", answer
 
             # 其他留资（微信/地址等）→ 通用留资成功话术
@@ -3785,7 +3785,7 @@ class CustomerServiceEngine:
                     if tpl_list:
                         answer = Template(random.choice(tpl_list)).render(**self._vars())
                         self.history.append({"user": text, "bot": answer})
-                        self.history = self.history[-3:]
+                        self.history = self.history[-20:]
                         return "lead_capture", answer
 
         # 0.3) 信息提取：从用户消息中抽取可收集字段，存入 collected_info
@@ -3799,7 +3799,7 @@ class CustomerServiceEngine:
             tag, answer = simple_result
             self.llm_fallback_streak = 0
             self.history.append({"user": text, "bot": answer})
-            self.history = self.history[-3:]
+            self.history = self.history[-20:]
             return tag, answer
 
         # 1) 取上一轮对话
@@ -3870,7 +3870,7 @@ class CustomerServiceEngine:
 
         # 7) 存历史
         self.history.append({"user": text, "bot": answer})
-        self.history = self.history[-3:]
+        self.history = self.history[-20:]
 
         return tag, answer
 
@@ -5134,10 +5134,22 @@ class CustomerServiceEngine:
         # 命中事实问题 → 先回答，再追加议价拉回话术，状态不推进
         if fact_answer:
             follow_up = self._get_bargain_follow_up()
-            # ponytail: 指代词反问类回答不需要加拉回尾巴
-            # 比如"您说的是哪两种板材呀？"后面再加"什么时候量房"很奇怪
+            # ponytail: 指代词反问类回答去掉量房相关句子，保留加微信引导
+            # "您说的是哪两种"后面问"什么时候量房"很突兀，但加微信是合理的
             if fact_category and "pronoun_clarify" in fact_category:
-                full_answer = fact_answer
+                # 去掉量房/上门相关的句子，保留加微信
+                import re as _re
+                lines = follow_up.split("\n")
+                filtered = []
+                for line in lines:
+                    if any(kw in line for kw in ["量房", "上门", "测量", "量尺寸", "上门看"]):
+                        continue
+                    filtered.append(line)
+                clean_follow_up = "\n".join(filtered).strip()
+                if clean_follow_up:
+                    full_answer = fact_answer + "\n" + clean_follow_up
+                else:
+                    full_answer = fact_answer
             else:
                 full_answer = fact_answer + "\n" + follow_up
             return "bargain/answer_detail", full_answer
@@ -5559,12 +5571,12 @@ class CustomerServiceEngine:
                     if tpl_list:
                         answer = self._render(random.choice(tpl_list))
                         self.history.append({"user": text, "bot": answer})
-                        self.history = self.history[-3:]
+                        self.history = self.history[-20:]
                         return "soft_close", answer
             # 兜底
             answer = f"行，您慢慢考虑。加我微信{self.config.get('wechat_id', '')}，有啥问题随时问我。"
             self.history.append({"user": text, "bot": answer})
-            self.history = self.history[-3:]
+            self.history = self.history[-20:]
             return "soft_close", answer
 
         # 1) LLM 意图路由（10分类）—— 判断用户问的是哪一类，决定走哪条路
@@ -5597,7 +5609,7 @@ class CustomerServiceEngine:
             tag = f"bargain/{stage}"
             # 保存上下文后返回
             self.history.append({"user": text, "bot": answer})
-            self.history = self.history[-3:]
+            self.history = self.history[-20:]
             return tag, answer
 
         # ========== 分支2：不在议价中 → 按LLM分类路由 ==========
@@ -5614,7 +5626,7 @@ class CustomerServiceEngine:
                         if tpl_list:
                             answer = self._render(random.choice(tpl_list))
                             self.history.append({"user": text, "bot": answer})
-                            self.history = self.history[-3:]
+                            self.history = self.history[-20:]
                             return "lead_capture", answer
 
             # 1=问价格 / 2=砍价 → 进议价状态机
@@ -5623,7 +5635,7 @@ class CustomerServiceEngine:
                 self.llm_fallback_streak = 0
                 tag = f"bargain/{stage}"
                 self.history.append({"user": text, "bot": answer})
-                self.history = self.history[-3:]
+                self.history = self.history[-20:]
                 return tag, answer
 
             # 3=材料对比 → 走材料对比模板
@@ -5636,7 +5648,7 @@ class CustomerServiceEngine:
                             answer = self._render(random.choice(tpl_list))
                             tag = "material/compare"
                             self.history.append({"user": text, "bot": answer})
-                            self.history = self.history[-3:]
+                            self.history = self.history[-20:]
                             return tag, answer
 
             # 4=材料细节 / 5=工艺问题 → 先关键词命中，答不上走知识库
@@ -5646,7 +5658,7 @@ class CustomerServiceEngine:
                 if hot_result is not None:
                     tag, answer = hot_result
                     self.history.append({"user": text, "bot": answer})
-                    self.history = self.history[-3:]
+                    self.history = self.history[-20:]
                     return tag, answer
                 # 关键词没命中 → 降级走原LLM四分类兜底（会走知识库检索）
                 # 交给下面的else分支
@@ -5667,7 +5679,7 @@ class CustomerServiceEngine:
                             answer = self._render(tpl)
                             tag = "measurement/design"
                             self.history.append({"user": text, "bot": answer})
-                            self.history = self.history[-3:]
+                            self.history = self.history[-20:]
                             return tag, answer
 
             # 8=产品类型 → 产品范围模板
@@ -5680,7 +5692,7 @@ class CustomerServiceEngine:
                             answer = self._render(random.choice(tpl_list))
                             tag = "product/type"
                             self.history.append({"user": text, "bot": answer})
-                            self.history = self.history[-3:]
+                            self.history = self.history[-20:]
                             return tag, answer
 
             # 9=闲聊 → 先匹配细分闲聊关键词，再走通用模板
@@ -5693,7 +5705,7 @@ class CustomerServiceEngine:
                     # 只处理闲聊类的细分（chat_前缀的category）
                     if cat.startswith("chat_"):
                         self.history.append({"user": text, "bot": ans})
-                        self.history = self.history[-3:]
+                        self.history = self.history[-20:]
                         return cat, ans
                 # 没匹配到细分 → 走通用chitchat模板
                 for hot_q in self.templates.get("hot_questions", []):
@@ -5703,7 +5715,7 @@ class CustomerServiceEngine:
                             answer = self._render(random.choice(tpl_list))
                             tag = "chat/chitchat"
                             self.history.append({"user": text, "bot": answer})
-                            self.history = self.history[-3:]
+                            self.history = self.history[-20:]
                             return tag, answer
 
             # 10=unclear / 其他 → 走原兜底逻辑（关键词→LLM四分类→盲区）
@@ -5786,7 +5798,7 @@ class CustomerServiceEngine:
 
             # 5) 上下文记忆（最多 3 轮）
         self.history.append({"user": text, "bot": answer})
-        self.history = self.history[-3:]
+        self.history = self.history[-20:]
 
         # 6) 对话结束判断（仅日志 + 清上下文，红线：不发任何消息）
         if self.is_chat_ended(text):
