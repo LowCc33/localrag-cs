@@ -1473,6 +1473,190 @@ class CustomerServiceEngine:
 
         return results
 
+    def _detect_room_types_attrs(self, text):
+        """
+        场景检测增强版：返回场景+属性（支持LLM兜底）
+        返回：list of dict，每个dict含 {scene_key, scene_name, attributes: []}
+        attributes 可能的值："outdoor"（室外）、"kids"（儿童用）、"wet"（潮湿环境）等
+        
+        三层架构：
+        1. 关键词快速匹配（覆盖常见说法）
+        2. LLM语义识别兜底（长尾说法 + 属性识别）
+        3. 降级：LLM失败只用关键词结果
+        """
+        # 第一层：关键词匹配（快速通道）
+        keyword_results = self._detect_room_types(text)
+        results = []
+        seen_keys = set()
+        for scene_key, scene_name in keyword_results:
+            results.append({
+                "scene_key": scene_key,
+                "scene_name": scene_name,
+                "attributes": [],  # 关键词匹配暂时不给属性，交给LLM补
+            })
+            seen_keys.add(scene_key)
+
+        # 关键词命中 >=3个 → 直接返回，不调LLM（够多了，省时间）
+        if len(results) >= 3:
+            return results[:4]
+
+        # 第二层：LLM语义兜底（补全漏识别的场景 + 识别属性）
+        scene_prompt = """你是一个全屋定制客服的场景识别器。根据用户说的话，识别出提到的所有家具使用场景，以及每个场景的特殊属性。
+
+可选场景（scene_key）：
+- bedroom_wardrobe - 卧室/衣柜/衣帽间
+- kitchen - 厨房/橱柜
+- bathroom - 卫生间/浴室柜/洗手台
+- balcony - 阳台/阳台柜/洗衣柜
+- shoe_cabinet - 鞋柜/玄关柜/入户柜
+- living_room - 客厅/电视柜/餐边柜
+- kids_room - 儿童房/小孩房
+- tatami - 榻榻米/地台/书房
+- whole_house - 全屋定制/整套/整体
+- basement - 地下室/室外储物柜（户外用）
+
+可选属性（attributes，多选）：
+- outdoor - 室外/户外/露天/风吹雨淋
+- kids - 儿童用/孩子用/宝宝用
+- wet - 潮湿环境/卫生间/阳台/厨房
+- none - 无特殊属性
+
+输出格式：JSON数组，每个元素包含 scene_key 和 attributes（数组）。不要输出其他文字。
+示例：
+输入："室外鞋柜"
+输出：[{"scene_key":"shoe_cabinet","attributes":["outdoor"]}]
+
+输入："小孩房衣柜和阳台柜"
+输出：[{"scene_key":"kids_room","attributes":["kids"]},{"scene_key":"balcony","attributes":["wet","outdoor"]}]
+
+输入："做橱柜和衣柜"
+输出：[{"scene_key":"kitchen","attributes":["wet"]},{"scene_key":"bedroom_wardrobe","attributes":[]}]
+
+注意：
+- 如果用户说"全屋/整套/所有"，只返回 whole_house 一个场景
+- 厨房、卫生间、阳台默认带 wet 属性
+- 室外/户外/露天 的场景带 outdoor 属性
+- 儿童/小孩/宝宝 的场景带 kids 属性
+- 不要输出不在列表中的scene_key
+只输出JSON数组，不要解释，不要其他文字。
+"""
+
+        try:
+            import json
+            llm_raw = self._llm_classify_raw(text, scene_prompt, cache_prefix="scene", timeout=8)
+            if llm_raw:
+                # 清理可能的markdown标记
+                llm_raw = llm_raw.replace("```json", "").replace("```", "").strip()
+                # 尝试找JSON数组
+                import re
+                m = re.search(r'\[.*\]', llm_raw, re.DOTALL)
+                if m:
+                    json_str = m.group()
+                    llm_scenes = json.loads(json_str)
+                    # 合法场景key列表
+                    valid_scenes = [
+                        "bedroom_wardrobe", "kitchen", "bathroom", "balcony",
+                        "shoe_cabinet", "living_room", "kids_room", "tatami",
+                        "whole_house", "basement",
+                    ]
+                    valid_attrs = ["outdoor", "kids", "wet"]
+                    for item in llm_scenes:
+                        sk = item.get("scene_key", "")
+                        if sk not in valid_scenes:
+                            continue
+                        attrs = [a for a in item.get("attributes", []) if a in valid_attrs]
+                        # 全屋优先
+                        if sk == "whole_house":
+                            scene_name = self.rec_matrix.get("scene_names", {}).get(sk, sk)
+                            return [{"scene_key": sk, "scene_name": scene_name, "attributes": attrs}]
+                        if sk not in seen_keys:
+                            scene_name = self.rec_matrix.get("scene_names", {}).get(sk, sk)
+                            results.append({
+                                "scene_key": sk,
+                                "scene_name": scene_name,
+                                "attributes": attrs,
+                            })
+                            seen_keys.add(sk)
+                            if len(results) >= 4:
+                                break
+                        else:
+                            # 已有关键词命中的场景 → 合并属性
+                            for r in results:
+                                if r["scene_key"] == sk:
+                                    for a in attrs:
+                                        if a not in r["attributes"]:
+                                            r["attributes"].append(a)
+                                    break
+                print(f"  [场景检测LLM兜底] LLM返回{len(llm_scenes) if 'llm_scenes' in dir() else 0}个场景，当前共{len(results)}个")
+        except Exception as e:
+            print(f"  [场景检测LLM兜底] 失败: {e}，使用关键词结果")
+
+        return results[:4]
+
+    def _llm_classify_raw(self, text, system_prompt, cache_prefix="llmraw", timeout=8):
+        """
+        LLM原始输出工具：返回LLM的原始文本（用于JSON输出等复杂分类）
+        失败/超时返回None
+        """
+        import hashlib
+
+        prev_user = ""
+        prev_bot = ""
+        if self.history:
+            last = self.history[-1]
+            prev_user = last.get("user", "")
+            prev_bot = last.get("bot", "")
+
+        cache_content = text.strip() + "|" + prev_user + "|" + prev_bot
+        cache_key = f"{cache_prefix}:" + hashlib.md5(cache_content.encode("utf-8")).hexdigest()
+        redis_client = self._get_redis()
+        if redis_client:
+            try:
+                cached = redis_client.get(cache_key)
+                if cached:
+                    return cached
+            except Exception:
+                pass
+
+        if prev_user and prev_bot:
+            user_msg = (
+                f"上一轮对话：\n"
+                f"用户：{prev_user}\n"
+                f"客服：{prev_bot}\n\n"
+                f"当前用户说：{text}\n"
+                f"输出："
+            )
+        else:
+            user_msg = f"用户说：{text}\n输出："
+
+        try:
+            resp = requests.post(
+                API_URL,
+                headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    "temperature": 0,
+                },
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip()
+
+            if redis_client and content:
+                try:
+                    redis_client.setex(cache_key, 7 * 24 * 3600, content)
+                except Exception:
+                    pass
+
+            return content
+        except Exception as e:
+            print(f"[LLM原始输出降级] prefix={cache_prefix}, error={e}")
+            return None
+
     def _detect_preference_type(self, text):
         """
         检测用户在选材料阶段的偏好类型
@@ -1521,6 +1705,26 @@ class CustomerServiceEngine:
             return "recommend_me"
         if any(kw in text for kw in balanced_keywords):
             return "balanced"
+
+        # 关键词没命中 → LLM语义兜底（二级防线）
+        pref_prompt = """你是一个全屋定制客服的用户偏好识别器。根据用户说的话，判断用户在选材料时的偏好类型。
+
+分类定义：
+- cost_effective - 追求性价比、便宜、预算有限、划算、经济实惠
+- eco_friendly - 关注环保、甲醛、健康、孩子/孕妇/宝宝用
+- quality - 追求品质、高端、好点的、上档次、耐用、要好的、不想用太差的
+- recommend_me - 用户主动让推荐、问哪个好、给点建议
+- balanced - 用户说随便、都行、看着办、无所谓、都可以
+- none - 完全看不出偏好倾向
+
+只返回一个分类英文标签（小写），不要解释，不要其他文字。合法值：cost_effective / eco_friendly / quality / recommend_me / balanced / none
+"""
+        valid_prefs = ["cost_effective", "eco_friendly", "quality", "recommend_me", "balanced", "none"]
+        llm_result = self._llm_classify(text, pref_prompt, valid_prefs, cache_prefix="pref", timeout=8)
+        if llm_result and llm_result != "none" and llm_result in valid_prefs:
+            print(f"  [偏好检测LLM兜底] 关键词未命中，LLM识别为: {llm_result}")
+            return llm_result
+
         return None
 
     def _get_recommendation(self, text):
@@ -1710,6 +1914,16 @@ class CustomerServiceEngine:
         scene_key, scene_name = self._detect_room_type(text)
         preference = self._detect_preference_type(text)
 
+        # 室外场景检测：如果带outdoor属性，强制映射到basement（室外储物柜）
+        # ponytail: 室外环境只能用焊接大板，不能让碳脂板出场，这个逻辑写死
+        room_attrs = self._detect_room_types_attrs(text)
+        if room_attrs:
+            first = room_attrs[0]
+            attrs = first.get("attributes", [])
+            if "outdoor" in attrs:
+                scene_key = "basement"
+                scene_name = "室外储物柜"
+
         # 都没有 → 返回None
         if not scene_key and not preference:
             return None
@@ -1776,16 +1990,26 @@ class CustomerServiceEngine:
         # 5个以上
         return f"{scene_names[0]}、{scene_names[1]}等{n}个地方"
 
-    def _get_scene_recommendation(self, scene_key, preference="cost_effective"):
+    def _get_scene_recommendation(self, scene_key, preference="cost_effective", attributes=None):
         """
         查单个场景的推荐板材
+        Args:
+            scene_key: 场景key
+            preference: 偏好类型
+            attributes: 场景属性列表（如["outdoor"]），室外场景强制映射到basement
         返回：(material_key, material_name, material_price, reason) 或 (None, None, None, None)
         """
         from customer_service.shop_config_loader import get_material_name, get_material_price
 
+        # 室外场景 → 强制映射到basement（室外储物柜），只能用焊接大板
+        # ponytail: 室外环境只能用焊接大板，普通材料扛不住，这个逻辑写死
+        effective_scene_key = scene_key
+        if attributes and "outdoor" in attributes and self.private_rec_matrix:
+            effective_scene_key = "basement"
+
         # 有私有矩阵 → 先走私有矩阵逻辑
         if self.private_rec_matrix:
-            scene_cfg, _ = self._get_private_scene_config(scene_key)
+            scene_cfg, _ = self._get_private_scene_config(effective_scene_key)
             if scene_cfg:
                 mat_key, reason = self._pick_private_material(scene_cfg, preference)
                 if mat_key:
@@ -1976,15 +2200,15 @@ class CustomerServiceEngine:
           "follow_up": str,  # 跟进提问
         }
         """
-        # 1. 检测所有场景
-        room_types = self._detect_room_types(text)
+        # 1. 检测所有场景（带属性）
+        room_data = self._detect_room_types_attrs(text)
 
         # 场景数 < 2 → 返回None，走单场景逻辑
-        if len(room_types) < 2:
+        if len(room_data) < 2:
             return None
 
         # 全屋场景只有1个的话，也不走多场景
-        if len(room_types) == 1 and room_types[0][0] == "whole_house":
+        if len(room_data) == 1 and room_data[0]["scene_key"] == "whole_house":
             return None
 
         # 2. 默认偏好 = 性价比（如果没指定）
@@ -1993,9 +2217,12 @@ class CustomerServiceEngine:
 
         # 3. 逐个场景查推荐
         scenes = []
-        for scene_key, scene_name in room_types:
+        for room in room_data:
+            scene_key = room["scene_key"]
+            scene_name = room["scene_name"]
+            attrs = room.get("attributes", [])
             mat_key, mat_name, mat_price, reason = self._get_scene_recommendation(
-                scene_key, preference
+                scene_key, preference, attributes=attrs
             )
             if not mat_key:
                 continue
@@ -2012,6 +2239,7 @@ class CustomerServiceEngine:
                 "material_price": mat_price,
                 "is_same_as_selected": is_same,
                 "reason": reason,
+                "attributes": attrs,  # 保留属性，供话术层使用
             })
 
         if len(scenes) < 2:
@@ -2459,6 +2687,96 @@ class CustomerServiceEngine:
         if is_question:
             return False  # 疑问句 + 只有弱相关 → 换话题了
         return True  # 非疑问句 + 弱相关 → 还算在聊价格
+
+    # ---------- LLM通用分类工具函数 ----------
+    def _llm_classify(self, text, system_prompt, options, cache_prefix="llmcls", timeout=8):
+        """
+        通用LLM分类工具：给定用户输入+系统提示词+可选值列表，返回其中一个
+        
+        Args:
+            text: 用户输入文本
+            system_prompt: 系统提示词（描述分类任务和各选项含义）
+            options: list of str，合法的分类值
+            cache_prefix: 缓存key前缀，用于区分不同分类任务
+            timeout: 超时时间（秒）
+        
+        Returns:
+            str: options中的一个值，失败/超时返回None
+        """
+        import hashlib
+
+        # 取上一轮对话做上下文
+        prev_user = ""
+        prev_bot = ""
+        if self.history:
+            last = self.history[-1]
+            prev_user = last.get("user", "")
+            prev_bot = last.get("bot", "")
+
+        # 缓存key：用户输入+上下文
+        cache_content = text.strip() + "|" + prev_user + "|" + prev_bot
+        cache_key = f"{cache_prefix}:" + hashlib.md5(cache_content.encode("utf-8")).hexdigest()
+        redis_client = self._get_redis()
+        if redis_client:
+            try:
+                cached = redis_client.get(cache_key)
+                if cached and cached in options:
+                    return cached
+            except Exception:
+                pass  # Redis挂了也不影响主流程
+
+        # 组装用户消息：有上下文就带上一轮
+        if prev_user and prev_bot:
+            user_msg = (
+                f"上一轮对话：\n"
+                f"用户：{prev_user}\n"
+                f"客服：{prev_bot}\n\n"
+                f"当前用户说：{text}\n"
+                f"分类标签："
+            )
+        else:
+            user_msg = f"用户说：{text}\n分类标签："
+
+        try:
+            resp = requests.post(
+                API_URL,
+                headers={"Authorization": f"Bearer {API_KEY}", "Content-Type": "application/json"},
+                json={
+                    "model": MODEL,
+                    "messages": [
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_msg},
+                    ],
+                    "temperature": 0,
+                },
+                timeout=timeout,
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"].strip().lower()
+
+            # 在合法值中找匹配（精确匹配优先，然后包含匹配）
+            result = None
+            for opt in options:
+                if opt == content:
+                    result = opt
+                    break
+            if not result:
+                for opt in options:
+                    if opt in content:
+                        result = opt
+                        break
+
+            # 写入缓存，过期7天
+            if result and redis_client:
+                try:
+                    redis_client.setex(cache_key, 7 * 24 * 3600, result)
+                except Exception:
+                    pass
+
+            return result
+        except Exception as e:
+            print(f"[LLM分类降级] prefix={cache_prefix}, error={e}")
+            return None
 
     # ---------- 4) LLM 4 分类意图识别（兜底用） ----------
     def _get_redis(self):
