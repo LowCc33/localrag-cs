@@ -409,15 +409,34 @@ class CustomerServiceEngine:
         return found
 
     def _get_context_materials(self):
-        """从上一轮bot回答中提取上下文提到的板材"""
+        """
+        从最近几轮对话中提取上下文提到的板材
+        往前遍历最近5轮，每轮的bot消息和用户消息都查
+        找到最近一条提到板材的消息，提取里面的板材名称，去重，按出现顺序返回
+        遍历完5轮都没找到 → 返回空列表
+        """
         if not self.history:
             return []
-        # 找最近一条bot消息
+        # 往前找最近5轮（从最新的开始）
+        checked = 0
+        all_found = []  # 按出现顺序，去重
+        seen = set()
         for entry in reversed(self.history):
+            if checked >= 5:
+                break
+            checked += 1
+            # bot消息和用户消息都查
             bot_text = entry.get("bot", "")
-            if bot_text:
-                return self._extract_materials_from_text(bot_text)
-        return []
+            user_text = entry.get("user", "")
+            for text in (bot_text, user_text):
+                if not text:
+                    continue
+                mats = self._extract_materials_from_text(text)
+                for m in mats:
+                    if m not in seen:
+                        all_found.append(m)
+                        seen.add(m)
+        return all_found
 
     def _detect_pronoun_type(self, text):
         """检测指代词类型：返回 'exact_two' / 'ambiguous' / None"""
@@ -471,9 +490,6 @@ class CustomerServiceEngine:
 
         context_materials = self._get_context_materials()
         num_context = len(context_materials)
-
-        if num_context == 0:
-            return None  # 上文没有板材，走原有关键词匹配
 
         # === 明确2种型 ===
         if pronoun_type == "exact_two":
