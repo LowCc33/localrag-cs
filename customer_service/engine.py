@@ -1408,6 +1408,9 @@ class CustomerServiceEngine:
             ("bookcase", [
                 "书柜", "书架", "展示柜", "陈列柜", "文件柜",
             ]),
+            ("living_room", [
+                "客厅柜", "客厅储物柜", "客厅收纳柜",
+            ]),
             ("shoe_cabinet", [
                 "鞋柜", "门厅柜", "入户柜",
             ]),
@@ -1465,6 +1468,9 @@ class CustomerServiceEngine:
             ]),
             ("bookcase", [
                 "书柜", "书架", "展示柜", "陈列柜", "文件柜",
+            ]),
+            ("living_room", [
+                "客厅柜", "客厅储物柜", "客厅收纳柜",
             ]),
             ("shoe_cabinet", [
                 "鞋柜", "门厅柜", "入户柜",
@@ -1541,10 +1547,11 @@ class CustomerServiceEngine:
                     if "outdoor" not in r["attributes"]:
                         r["attributes"].append("outdoor")
                     break
-            # 特殊："阳台"场景，如果有"户外""露天"等直接修饰，也算室外
+            # 阳台场景的特殊修饰词（也得是短语匹配，不能文本里有室外就给阳台加）
             if scene_key == "balcony":
-                for prefix in outdoor_prefixes:
-                    if prefix in text:
+                balcony_outdoor_phrases = ["户外阳台", "露天阳台", "室外阳台", "露台阳台"]
+                for phrase in balcony_outdoor_phrases:
+                    if phrase in text:
                         if "outdoor" not in r["attributes"]:
                             r["attributes"].append("outdoor")
                         break
@@ -1882,6 +1889,7 @@ class CustomerServiceEngine:
         "tv_cabinet": "tv_cabinet",
         "dining": "dining",
         "bookcase": "bookcase",
+        "living_room": "living_room",
         "shoe_cabinet": "shoe_cabinet",
         "entrance": "entrance",
         "wardrobe": "wardrobe",
@@ -1946,12 +1954,13 @@ class CustomerServiceEngine:
         main_push = scene_cfg.get("main_push")
         reason = scene_cfg.get("reason", "")
 
-        # 品质/颜值偏好 → 优先碳脂板（如果推荐级以上）
+        # 品质/颜值偏好 → 只有carbon是strong_recommend才首推碳脂板（门面三件套）
+        # carbon=recommend的场景（实用区）→ 还是主推焊接大板
         if preference == "quality":
             carbon_level = scene_cfg.get("carbon", "not_recommend")
-            if carbon_level in ("strong_recommend", "recommend"):
+            if carbon_level == "strong_recommend":
                 return "carbon", reason
-            # 碳脂板不推荐的话，退回主推
+            # recommend 及以下 → 主推款（焊接大板等）
             if main_push:
                 return main_push, reason
             return None, ""
@@ -2308,11 +2317,15 @@ class CustomerServiceEngine:
 
     def _build_multi_scene_quality_answer(self, scene_data_list):
         """
-        品质偏好多场景两档推荐话术生成
-        第一档：全铝焊接大板（主力款）— 所有场景都能用
-        第二档：碳脂板（升级款）— 室内场景可以升级
-        混搭建议：橱柜/浴室柜/阳台柜等潮湿场景可以柜体焊接大板+柜门碳脂板
-        室外场景：只能用焊接大板，明确说明不能用碳脂板
+        品质偏好多场景推荐话术生成（门面三件套首推碳脂板，其他主推焊接大板）
+
+        三组分类：
+        - face_scenes（颜值门面区）：carbon=strong_recommend 且 非室外 → 首推碳脂板
+        - must_welded_scenes（必须焊接大板）：室外 或 carbon=can_do/not_recommend → 只能焊接大板
+        - normal_scenes（常规实用区）：carbon=recommend → 主推焊接大板，可升级碳脂板
+
+        话术结构：先颜值区（碳脂板首推），再实用区（焊接大板主推），
+        最后室外单独强调 + 混搭建议
         """
         if not scene_data_list:
             return ""
@@ -2323,12 +2336,11 @@ class CustomerServiceEngine:
         carbon_name = mats.get("carbon", {}).get("name", "碳脂板")
         carbon_price = mats.get("carbon", {}).get("price", "1180")
 
-        # 分类：室外场景 / 可升级室内场景 / 不可升级室内场景
-        outdoor_scenes = []  # 室外，只能焊接大板
-        upgrade_scenes = []  # 可升级碳脂板的室内场景
-        main_only_scenes = []  # 只能用焊接大板的室内场景（碳脂板不推荐）
+        # === 三组分类 ===
+        face_scenes = []       # 颜值门面区：carbon=strong_recommend + 非室外
+        must_welded_scenes = [] # 必须焊接大板：室外 或 carbon<=can_do
+        normal_scenes = []     # 常规实用区：carbon=recommend
 
-        # 先查每个场景的碳脂板推荐级别
         for s in scene_data_list:
             attrs = s.get("attributes", [])
             is_outdoor = "outdoor" in attrs
@@ -2336,56 +2348,64 @@ class CustomerServiceEngine:
             carbon_level = "not_recommend"
             if scene_cfg:
                 carbon_level = scene_cfg.get("carbon", "not_recommend")
-            can_upgrade = carbon_level in ("strong_recommend", "recommend")
 
             scene_info = {
                 "key": s["scene_key"],
                 "name": s["scene_name"],
-                "reason": s.get("reason", ""),
+                "carbon_level": carbon_level,
+                "is_outdoor": is_outdoor,
             }
 
-            if is_outdoor:
-                outdoor_scenes.append(scene_info)
-            elif can_upgrade:
-                upgrade_scenes.append(scene_info)
-            else:
-                main_only_scenes.append(scene_info)
+            if is_outdoor or carbon_level in ("can_do", "not_recommend"):
+                must_welded_scenes.append(scene_info)
+            elif carbon_level == "strong_recommend":
+                face_scenes.append(scene_info)
+            else:  # recommend
+                normal_scenes.append(scene_info)
 
         lines = []
 
         # === 开头 ===
-        lines.append("追求品质的话，我给您说两个档次的选择：")
+        lines.append("追求品质的话，我给您说下怎么搭配最合适：")
 
-        # === 第一档：主力款 焊接大板 ===
-        # 汇总所有场景名（焊接大板是所有场景都能用的）
-        all_scene_names = [s["name"] for s in outdoor_scenes + upgrade_scenes + main_only_scenes]
-        main_scene_text = "、".join(all_scene_names)
-        lines.append(f"· 【{welded_name}】{welded_price}一平：{main_scene_text}都能用，结实耐用防潮，是我们卖得最多的款，口碑也最好。")
+        # === 第一档：颜值门面区 → 首推碳脂板 ===
+        if face_scenes:
+            face_names = "、".join([s["name"] for s in face_scenes])
+            lines.append(f"· 【{carbon_name}】{carbon_price}一平：{face_names}这些门面位置我首推这个，质感接近实木，做出来效果最上档次，也是现在高端客户选得最多的。")
 
-        # 室外场景强调
-        if outdoor_scenes:
-            outdoor_names = "、".join([s["name"] for s in outdoor_scenes])
-            lines.append(f"  特别是{outdoor_names}，风吹雨淋的，只能用{welded_name}才扛得住，不建议用{carbon_name}，日晒容易老化。")
+        # === 第二档：实用区 → 主推焊接大板 ===
+        welded_scenes = normal_scenes + must_welded_scenes
+        if welded_scenes:
+            welded_names = "、".join([s["name"] for s in welded_scenes])
+            if face_scenes:
+                lines.append(f"剩下的{welded_names}这些我推荐用【{welded_name}】，{welded_price}一平，结实耐用防潮，零甲醛环保，性价比最高。")
+            else:
+                lines.append(f"· 【{welded_name}】{welded_price}一平：{welded_names}这些我推荐用这个，结实耐用防潮，零甲醛环保，性价比最高。")
 
-        # === 第二档：升级款 碳脂板 ===
-        if upgrade_scenes:
-            upgrade_names = "、".join([s["name"] for s in upgrade_scenes])
-            lines.append(f"· 【{carbon_name}】{carbon_price}一平：预算够的话，{upgrade_names}可以用这个升级，颜值更高，质感更好。")
+        # === 室外场景单独强调 ===
+        outdoor_only = [s for s in must_welded_scenes if s["is_outdoor"]]
+        if outdoor_only:
+            outdoor_names = "、".join([s["name"] for s in outdoor_only])
+            # ponytail: 地下室和室外的卖点不一样，话术要区分
+            has_outdoor = any("室外" in s["name"] or "户外" in s["name"] for s in outdoor_only)
+            has_basement = any("地下室" in s["name"] for s in outdoor_only)
+            if has_outdoor and not has_basement:
+                detail = "风吹雨淋日晒的，只有焊接大板能扛得住，不建议用碳脂板，日晒容易老化"
+            elif has_basement and not has_outdoor:
+                detail = "常年潮湿不通风，木质的容易发霉变形，焊接大板最靠谱"
+            else:
+                detail = "潮湿+户外环境都得扛得住，只能用焊接大板才放心，碳脂板日晒雨淋容易出问题"
+            lines.append(f"  特别是{outdoor_names}，{detail}。")
 
-        # === 混搭建议（仅室内潮湿场景：厨房/浴室/室内阳台） ===
-        # ponytail: 室外阳台不提混搭（柜门也得耐造，不能用碳脂板）
-        # 衣柜/鞋柜/电视柜等也不提混搭（一般通体用一种材料）
-        mix_match_scenes = []
-        for s in scene_data_list:
-            attrs = s.get("attributes", [])
-            scene_key = s["scene_key"]
-            # 只在厨房、浴室、室内阳台（无outdoor）提混搭
-            if scene_key in ("kitchen", "bathroom", "balcony") and "outdoor" not in attrs:
-                mix_match_scenes.append(s["scene_name"])
-
-        if mix_match_scenes:
-            mix_text = "、".join(mix_match_scenes)
-            lines.append(f"  像{mix_text}这些地方，很多客户是柜体用{welded_name}+柜门用{carbon_name}混搭，既防潮耐造又有颜值，性价比也不错。")
+        # === 混搭建议（实用区的场景都可以提混搭） ===
+        # ponytail: 混搭范围扩大，不只是厨房浴室阳台，衣柜书柜等都可以
+        mix_scenes = [s["name"] for s in normal_scenes]
+        if mix_scenes:
+            if len(mix_scenes) > 3:
+                mix_text = "、".join(mix_scenes[:3]) + "等"
+            else:
+                mix_text = "、".join(mix_scenes)
+            lines.append(f"  像{mix_text}这些地方，很多客户是柜体用{welded_name}+柜门用{carbon_name}混搭，既耐造又有颜值，性价比也不错。")
 
         # === 结尾跟进 ===
         lines.append("您看这个搭配可以不？大概做多大面积？")

@@ -10,10 +10,22 @@
       "not_recommend": "不推荐"
     },
     "materials": {
-      "spc": {"name": "SPC蜂窝板", "price": 480},
-      "honeycomb": {"name": "全铝蜂窝板", "price": 680},
-      "welded": {"name": "全铝焊接大板", "price": 980},
-      "carbon": {"name": "碳脂板", "price": 1180}
+      "spc": {
+        "name": "SPC蜂窝板",
+        "price": 480
+      },
+      "honeycomb": {
+        "name": "全铝蜂窝板",
+        "price": 680
+      },
+      "welded": {
+        "name": "全铝焊接大板",
+        "price": 980
+      },
+      "carbon": {
+        "name": "碳脂板",
+        "price": 1180
+      }
     }
   },
   "scenes": {
@@ -82,9 +94,9 @@
       "spc": "can_do",
       "honeycomb": "recommend",
       "welded": "recommend",
-      "carbon": "strong_recommend",
-      "main_push": "carbon",
-      "reason": "书柜展示的是品味，碳脂板质感接近实木，放书放摆件都显档次，而且零甲醛对身体好。",
+      "carbon": "recommend",
+      "main_push": "welded",
+      "reason": "书柜天天用，焊接大板结实耐用零甲醛，放书放摆件都没问题。追求质感也可以升级碳脂板。",
       "mix_match": "柜体焊接大板（承重好）+ 柜门碳脂板（颜值高），很多客户这么搭。"
     },
     "鞋柜": {
@@ -112,7 +124,7 @@
       "spc": "can_do",
       "honeycomb": "recommend",
       "welded": "strong_recommend",
-      "carbon": "strong_recommend",
+      "carbon": "recommend",
       "main_push": "welded",
       "reason": "衣柜用量最大、天天用，焊接大板结实耐用零甲醛，一步到位最省心。追求品质和颜值就上碳脂板。",
       "mix_match": "柜体焊接大板+柜门碳脂板，里面结实外面好看，是现在最流行的搭法。"
@@ -122,7 +134,7 @@
       "spc": "not_recommend",
       "honeycomb": "recommend",
       "welded": "strong_recommend",
-      "carbon": "strong_recommend",
+      "carbon": "recommend",
       "main_push": "welded",
       "reason": "孩子的房间环保最重要，全铝零甲醛，装完当天就能住。焊接大板结实耐造，孩子怎么折腾都不怕。",
       "mix_match": "看重颜值和环保的话直接上碳脂板，质感温润不像金属，对孩子更友好。"
@@ -136,6 +148,16 @@
       "main_push": "welded",
       "reason": "全屋定制一步到位选焊接大板最省心，全房零甲醛，防水防潮耐用，用二三十年都没问题。",
       "mix_match": "最推荐混搭方案：厨房、卫生间、阳台这些潮湿地方用焊接大板，客厅、卧室这些颜值区用碳脂板或者柜门用碳脂板，实用又好看，性价比最高。"
+    },
+    "客厅柜/客厅储物柜": {
+      "scene_key": "living_room",
+      "main_push": "welded",
+      "reason": "客厅柜实用为主，焊接大板结实耐用零甲醛，放杂物放摆件都没问题。追求质感也可以升级碳脂板。",
+      "spc": "can_do",
+      "honeycomb": "recommend",
+      "welded": "strong_recommend",
+      "carbon": "recommend",
+      "mix_match": "柜体焊接大板+柜门碳脂板，里面结实外面好看，是现在最流行的搭法。"
     }
   },
   "special_shapes": {
