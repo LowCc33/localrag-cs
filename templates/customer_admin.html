@@ -1,0 +1,1102 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>客户管理 - LocalRAG-CS</title>
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Font Awesome图标库 -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        /* ============ 全局 ============ */
+        * { box-sizing: border-box; }
+        html, body { height: 100%; margin: 0; padding: 0; }
+        body {
+            background: #1a1a2e;
+            color: #e0e0e0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        /* 自定义滚动条 */
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #3a3a5c; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #4a4a6c; }
+
+        /* ============ 顶栏 ============ */
+        .topbar {
+            background: linear-gradient(135deg, #2d2d4a, #1e1e2e);
+            border-bottom: 1px solid #2a2a4a;
+            padding: 0 20px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
+            z-index: 10;
+        }
+        .topbar-logo {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .topbar-logo .logo-icon {
+            width: 38px;
+            height: 38px;
+            background: linear-gradient(135deg, #6c63ff, #9b7eff);
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 18px;
+            color: #fff;
+            box-shadow: 0 2px 10px rgba(108, 99, 255, 0.3);
+        }
+        .topbar-logo .logo-text {
+            font-size: 17px;
+            font-weight: 700;
+            color: #fff;
+            letter-spacing: 0.5px;
+        }
+        .topbar-logo .logo-sub {
+            font-size: 12px;
+            color: #9a9ac5;
+            margin-top: 2px;
+        }
+
+        /* ============ 主内容区 ============ */
+        .main-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+        }
+
+        /* ============ 卡片 ============ */
+        .card {
+            background: #252540;
+            border-radius: 12px;
+            border: 1px solid #2a2a4a;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        .card-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .card-title i {
+            color: #6c63ff;
+        }
+
+        /* ============ 筛选区 ============ */
+        .filter-bar {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-bottom: 16px;
+        }
+        .filter-bar input, .filter-bar select {
+            background: #1e1e32;
+            border: 1px solid #3a3a5c;
+            color: #e0e0e0;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+        .filter-bar input:focus, .filter-bar select:focus {
+            border-color: #6c63ff;
+        }
+        .filter-bar input {
+            min-width: 200px;
+        }
+        .filter-bar button {
+            background: linear-gradient(135deg, #6c63ff, #9b7eff);
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .filter-bar button:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(108, 99, 255, 0.4);
+        }
+        .filter-bar button.secondary {
+            background: #3a3a5c;
+        }
+        .filter-bar button.secondary:hover {
+            background: #4a4a6c;
+            box-shadow: none;
+        }
+
+        /* ============ 表格 ============ */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th {
+            background: #2a2a4a;
+            color: #9a9ac5;
+            font-weight: 500;
+            font-size: 13px;
+            text-align: left;
+            padding: 12px 16px;
+            border-bottom: 1px solid #3a3a5c;
+        }
+        td {
+            padding: 12px 16px;
+            border-bottom: 1px solid #2a2a4a;
+            font-size: 14px;
+            color: #e0e0e0;
+        }
+        tr:hover {
+            background: #2a2a4a;
+        }
+
+        /* ============ 状态标签 ============ */
+        .status-tag {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status-tag.wechat-none {
+            background: #3a3a5c;
+            color: #9a9ac5;
+        }
+        .status-tag.wechat-added {
+            background: rgba(74, 222, 128, 0.15);
+            color: #4ade80;
+        }
+        .status-tag.intent-a {
+            background: rgba(248, 113, 113, 0.15);
+            color: #f87171;
+        }
+        .status-tag.intent-b {
+            background: rgba(251, 191, 36, 0.15);
+            color: #fbbf24;
+        }
+        .status-tag.intent-c {
+            background: rgba(96, 165, 250, 0.15);
+            color: #60a5fa;
+        }
+        .secret-code {
+            background: rgba(108, 99, 255, 0.15);
+            color: #9b7eff;
+            padding: 3px 10px;
+            border-radius: 6px;
+            font-weight: 600;
+            font-family: monospace;
+            font-size: 13px;
+        }
+
+        /* ============ 操作按钮 ============ */
+        .action-btn {
+            background: transparent;
+            border: 1px solid #3a3a5c;
+            color: #9a9ac5;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-right: 4px;
+        }
+        .action-btn:hover {
+            border-color: #6c63ff;
+            color: #6c63ff;
+        }
+        .action-btn.primary {
+            background: rgba(108, 99, 255, 0.15);
+            border-color: #6c63ff;
+            color: #9b7eff;
+        }
+
+        /* ============ 分页 ============ */
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 8px;
+            margin-top: 20px;
+        }
+        .pagination button {
+            background: #2a2a4a;
+            border: 1px solid #3a3a5c;
+            color: #e0e0e0;
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .pagination button:hover:not(:disabled) {
+            border-color: #6c63ff;
+            color: #6c63ff;
+        }
+        .pagination button:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+        .pagination button.active {
+            background: #6c63ff;
+            border-color: #6c63ff;
+            color: #fff;
+        }
+        .pagination .page-info {
+            font-size: 13px;
+            color: #9a9ac5;
+            margin: 0 8px;
+        }
+
+        /* ============ 弹窗 ============ */
+        .modal-mask {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.6);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 100;
+        }
+        .modal-mask.show {
+            display: flex;
+        }
+        .modal {
+            background: #252540;
+            border-radius: 12px;
+            border: 1px solid #3a3a5c;
+            width: 90%;
+            max-width: 600px;
+            max-height: 85vh;
+            overflow-y: auto;
+        }
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid #3a3a5c;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .modal-title {
+            font-size: 16px;
+            font-weight: 600;
+            color: #fff;
+        }
+        .modal-close {
+            background: none;
+            border: none;
+            color: #9a9ac5;
+            font-size: 18px;
+            cursor: pointer;
+        }
+        .modal-body {
+            padding: 20px;
+        }
+        .modal-footer {
+            padding: 16px 20px;
+            border-top: 1px solid #3a3a5c;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        .modal-footer button {
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-cancel {
+            background: #3a3a5c;
+            border: 1px solid #4a4a6c;
+            color: #e0e0e0;
+        }
+        .btn-cancel:hover {
+            background: #4a4a6c;
+        }
+        .btn-confirm {
+            background: linear-gradient(135deg, #6c63ff, #9b7eff);
+            border: none;
+            color: #fff;
+        }
+        .btn-confirm:hover {
+            box-shadow: 0 4px 12px rgba(108, 99, 255, 0.4);
+        }
+
+        /* ============ 表单 ============ */
+        .form-group {
+            margin-bottom: 16px;
+        }
+        .form-label {
+            display: block;
+            font-size: 13px;
+            color: #9a9ac5;
+            margin-bottom: 6px;
+        }
+        .form-input, .form-select, .form-textarea {
+            width: 100%;
+            background: #1e1e32;
+            border: 1px solid #3a3a5c;
+            color: #e0e0e0;
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-size: 14px;
+            outline: none;
+        }
+        .form-input:focus, .form-select:focus, .form-textarea:focus {
+            border-color: #6c63ff;
+        }
+        .form-textarea {
+            resize: vertical;
+            min-height: 80px;
+            font-family: inherit;
+        }
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+        }
+
+        /* ============ 详情页信息格子 ============ */
+        .detail-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .detail-item {
+            background: #1e1e32;
+            padding: 12px;
+            border-radius: 6px;
+        }
+        .detail-label {
+            font-size: 12px;
+            color: #9a9ac5;
+            margin-bottom: 4px;
+        }
+        .detail-value {
+            font-size: 14px;
+            color: #e0e0e0;
+        }
+        .detail-value.empty {
+            color: #5a5a7c;
+            font-style: italic;
+        }
+
+        /* ============ 统计卡片 ============ */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+            margin-bottom: 20px;
+        }
+        .stat-card {
+            background: #252540;
+            border-radius: 12px;
+            border: 1px solid #2a2a4a;
+            padding: 20px;
+            text-align: center;
+        }
+        .stat-number {
+            font-size: 28px;
+            font-weight: 700;
+            color: #fff;
+            margin-bottom: 4px;
+        }
+        .stat-label {
+            font-size: 13px;
+            color: #9a9ac5;
+        }
+        .stat-card.primary .stat-number {
+            color: #6c63ff;
+        }
+        .stat-card.success .stat-number {
+            color: #4ade80;
+        }
+        .stat-card.warning .stat-number {
+            color: #fbbf24;
+        }
+
+        /* ============ 响应式 ============ */
+        @media (max-width: 768px) {
+            .stats-row {
+                grid-template-columns: repeat(2, 1fr);
+            }
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+            .detail-grid {
+                grid-template-columns: 1fr;
+            }
+            .filter-bar input {
+                min-width: auto;
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- ============ 顶栏 ============ -->
+    <div class="topbar">
+        <div class="topbar-logo">
+            <div class="logo-icon">
+                <i class="fas fa-users"></i>
+            </div>
+            <div>
+                <div class="logo-text">客户管理系统</div>
+                <div class="logo-sub">LocalRAG-CS · 客户归因 MVP</div>
+            </div>
+        </div>
+        <div class="topbar-right">
+            <span class="online-text">
+                <a href="/customer" style="color: #9a9ac5; text-decoration: none;">
+                    <i class="fas fa-comments"></i> 客服对话
+                </a>
+            </span>
+        </div>
+    </div>
+
+    <!-- ============ 主内容区 ============ -->
+    <div class="main-content">
+
+        <!-- 统计卡片 -->
+        <div class="stats-row">
+            <div class="stat-card primary">
+                <div class="stat-number" id="stat-total">0</div>
+                <div class="stat-label">客户总数</div>
+            </div>
+            <div class="stat-card success">
+                <div class="stat-number" id="stat-added">0</div>
+                <div class="stat-label">已加微信</div>
+            </div>
+            <div class="stat-card warning">
+                <div class="stat-number" id="stat-none">0</div>
+                <div class="stat-label">未加微信</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-number" id="stat-today">0</div>
+                <div class="stat-label">今日新增</div>
+            </div>
+        </div>
+
+        <!-- 客户列表卡片 -->
+        <div class="card">
+            <div class="card-title">
+                <i class="fas fa-list"></i>
+                客户列表
+            </div>
+
+            <!-- 筛选栏 -->
+            <div class="filter-bar">
+                <input type="text" id="search-input" placeholder="搜索暗号/微信昵称/手机号/小区...">
+                <select id="wechat-status-filter">
+                    <option value="">全部加微状态</option>
+                    <option value="none">未加微信</option>
+                    <option value="added">已加微信</option>
+                    <option value="lost">已流失</option>
+                </select>
+                <select id="intent-level-filter">
+                    <option value="">全部意向等级</option>
+                    <option value="A">A级意向</option>
+                    <option value="B">B级意向</option>
+                    <option value="C">C级意向</option>
+                </select>
+                <button onclick="loadCustomers()">
+                    <i class="fas fa-search"></i> 搜索
+                </button>
+                <button class="secondary" onclick="resetFilters()">
+                    <i class="fas fa-redo"></i> 重置
+                </button>
+            </div>
+
+            <!-- 表格 -->
+            <div style="overflow-x: auto;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>暗号</th>
+                            <th>微信昵称</th>
+                            <th>手机号</th>
+                            <th>场景</th>
+                            <th>面积</th>
+                            <th>加微状态</th>
+                            <th>意向等级</th>
+                            <th>创建时间</th>
+                            <th>操作</th>
+                        </tr>
+                    </thead>
+                    <tbody id="customer-tbody">
+                        <tr>
+                            <td colspan="9" style="text-align: center; color: #5a5a7c; padding: 40px;">
+                                加载中...
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 分页 -->
+            <div class="pagination" id="pagination"></div>
+        </div>
+    </div>
+
+    <!-- ============ 客户详情弹窗 ============ -->
+    <div class="modal-mask" id="detail-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <i class="fas fa-user-circle" style="color: #6c63ff;"></i>
+                    客户详情
+                </div>
+                <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="detail-body">
+                <!-- 动态填充 -->
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeDetailModal()">关闭</button>
+                <button class="btn-confirm" onclick="openEditModal()">编辑</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 编辑客户弹窗 ============ -->
+    <div class="modal-mask" id="edit-modal">
+        <div class="modal">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <i class="fas fa-edit" style="color: #6c63ff;"></i>
+                    编辑客户信息
+                </div>
+                <button class="modal-close" onclick="closeEditModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">客户类型</label>
+                        <select class="form-select" id="edit-customer-type">
+                            <option value="c_end">C端散客</option>
+                            <option value="b_end">B端合作商</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">意向等级</label>
+                        <select class="form-select" id="edit-intent-level">
+                            <option value="">未评定</option>
+                            <option value="A">A级</option>
+                            <option value="B">B级</option>
+                            <option value="C">C级</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">微信昵称</label>
+                        <input type="text" class="form-input" id="edit-wechat-nick" placeholder="请输入微信昵称">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">手机号</label>
+                        <input type="text" class="form-input" id="edit-phone" placeholder="请输入手机号">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">使用场景</label>
+                        <input type="text" class="form-input" id="edit-scenes" placeholder="如：衣柜,鞋柜,橱柜">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">面积</label>
+                        <input type="text" class="form-input" id="edit-area" placeholder="如：20平">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">偏好</label>
+                        <select class="form-select" id="edit-preference">
+                            <option value="">未选择</option>
+                            <option value="性价比">性价比</option>
+                            <option value="品质">品质</option>
+                            <option value="环保">环保</option>
+                            <option value="颜值">颜值</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">计价方式</label>
+                        <select class="form-select" id="edit-pricing-method">
+                            <option value="">未选择</option>
+                            <option value="projection">投影面积</option>
+                            <option value="expand">展开面积</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">小区/位置</label>
+                        <input type="text" class="form-input" id="edit-community" placeholder="请输入小区名称">
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">装修进度</label>
+                        <input type="text" class="form-input" id="edit-decoration-progress" placeholder="如：水电阶段">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label class="form-label">是否量房</label>
+                        <select class="form-select" id="edit-has-measurement">
+                            <option value="0">未量房</option>
+                            <option value="1">已量房</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label class="form-label">加微信状态</label>
+                        <select class="form-select" id="edit-wechat-status">
+                            <option value="none">未加</option>
+                            <option value="added">已加</option>
+                            <option value="lost">流失</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">来源渠道</label>
+                    <input type="text" class="form-input" id="edit-source-channel" placeholder="如：抖音/小红书/官网">
+                </div>
+                <div class="form-group">
+                    <label class="form-label">备注</label>
+                    <textarea class="form-textarea" id="edit-remark" placeholder="备注信息..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeEditModal()">取消</button>
+                <button class="btn-confirm" onclick="saveCustomer()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ 标记加微信弹窗 ============ -->
+    <div class="modal-mask" id="wechat-modal">
+        <div class="modal" style="max-width: 400px;">
+            <div class="modal-header">
+                <div class="modal-title">
+                    <i class="fab fa-weixin" style="color: #4ade80;"></i>
+                    标记已加微信
+                </div>
+                <button class="modal-close" onclick="closeWechatModal()">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label class="form-label">客户微信昵称</label>
+                    <input type="text" class="form-input" id="wechat-nick-input" placeholder="请输入微信昵称">
+                </div>
+                <div style="font-size: 12px; color: #9a9ac5; margin-top: 8px;">
+                    <i class="fas fa-lightbulb"></i>
+                    客户加微信时备注了暗号，可以在列表搜索框输入暗号快速找到对应客户
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn-cancel" onclick="closeWechatModal()">取消</button>
+                <button class="btn-confirm" onclick="markWechatAdded()">确认标记</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = "/api/customer-admin";
+        let currentPage = 1;
+        let pageSize = 20;
+        let currentCustomer = null;  // 当前查看/编辑的客户
+
+        // ========== 页面加载 ==========
+        document.addEventListener("DOMContentLoaded", function() {
+            loadCustomers();
+            loadStats();
+
+            // 回车搜索
+            document.getElementById("search-input").addEventListener("keypress", function(e) {
+                if (e.key === "Enter") {
+                    currentPage = 1;
+                    loadCustomers();
+                }
+            });
+        });
+
+        // ========== 加载客户列表 ==========
+        async function loadCustomers() {
+            const search = document.getElementById("search-input").value;
+            const wechatStatus = document.getElementById("wechat-status-filter").value;
+            const intentLevel = document.getElementById("intent-level-filter").value;
+
+            const params = new URLSearchParams({
+                page: currentPage,
+                page_size: pageSize,
+            });
+            if (search) params.append("search", search);
+            if (wechatStatus) params.append("wechat_status", wechatStatus);
+            if (intentLevel) params.append("intent_level", intentLevel);
+
+            try {
+                const res = await fetch(`${API_BASE}/list?${params.toString()}`);
+                const data = await res.json();
+
+                if (data.code === 0) {
+                    renderCustomerTable(data.data.customers);
+                    renderPagination(data.data.total, data.data.page, data.data.page_size);
+                } else {
+                    alert("加载失败：" + data.message);
+                }
+            } catch (e) {
+                console.error(e);
+                document.getElementById("customer-tbody").innerHTML =
+                    '<tr><td colspan="9" style="text-align: center; color: #f87171; padding: 40px;">加载失败，请检查服务是否正常</td></tr>';
+            }
+        }
+
+        // ========== 渲染客户表格 ==========
+        function renderCustomerTable(customers) {
+            const tbody = document.getElementById("customer-tbody");
+
+            if (!customers || customers.length === 0) {
+                tbody.innerHTML =
+                    '<tr><td colspan="9" style="text-align: center; color: #5a5a7c; padding: 40px;">暂无数据</td></tr>';
+                return;
+            }
+
+            tbody.innerHTML = customers.map(c => `
+                <tr>
+                    <td><span class="secret-code">${c.secret_code || '-'}</span></td>
+                    <td>${c.wechat_nick || '<span style="color: #5a5a7c;">-</span>'}</td>
+                    <td>${c.phone || '<span style="color: #5a5a7c;">-</span>'}</td>
+                    <td>${c.scenes || '<span style="color: #5a5a7c;">-</span>'}</td>
+                    <td>${c.area || '<span style="color: #5a5a7c;">-</span>'}</td>
+                    <td>${renderWechatStatus(c.wechat_status)}</td>
+                    <td>${renderIntentLevel(c.intent_level)}</td>
+                    <td style="color: #9a9ac5; font-size: 12px;">${c.created_at ? c.created_at.replace('T', ' ').substring(0, 16) : '-'}</td>
+                    <td>
+                        <button class="action-btn primary" onclick="viewDetail('${c.session_id}')">详情</button>
+                        ${c.wechat_status !== 'added' ?
+                            `<button class="action-btn" onclick="openWechatModal('${c.session_id}')">标记加微</button>` :
+                            ''
+                        }
+                    </td>
+                </tr>
+            `).join("");
+        }
+
+        function renderWechatStatus(status) {
+            const map = {
+                'none': ['未加微信', 'wechat-none'],
+                'added': ['已加微信', 'wechat-added'],
+                'lost': ['已流失', 'wechat-none'],
+            };
+            const [text, cls] = map[status] || ['-', 'wechat-none'];
+            return `<span class="status-tag ${cls}">${text}</span>`;
+        }
+
+        function renderIntentLevel(level) {
+            if (!level) return '<span style="color: #5a5a7c;">-</span>';
+            const cls = 'intent-' + level.toLowerCase();
+            return `<span class="status-tag ${cls}">${level}级</span>`;
+        }
+
+        // ========== 渲染分页 ==========
+        function renderPagination(total, page, pageSize) {
+            const totalPages = Math.ceil(total / pageSize);
+            const container = document.getElementById("pagination");
+
+            if (totalPages <= 1) {
+                container.innerHTML = `<span class="page-info">共 ${total} 条</span>`;
+                return;
+            }
+
+            let html = `<button onclick="goPage(${page - 1})" ${page <= 1 ? 'disabled' : ''}><i class="fas fa-chevron-left"></i></button>`;
+
+            // 页码按钮（最多显示5个）
+            let start = Math.max(1, page - 2);
+            let end = Math.min(totalPages, start + 4);
+            start = Math.max(1, end - 4);
+
+            for (let i = start; i <= end; i++) {
+                html += `<button class="${i === page ? 'active' : ''}" onclick="goPage(${i})">${i}</button>`;
+            }
+
+            html += `<button onclick="goPage(${page + 1})" ${page >= totalPages ? 'disabled' : ''}><i class="fas fa-chevron-right"></i></button>`;
+            html += `<span class="page-info">共 ${total} 条，第 ${page}/${totalPages} 页</span>`;
+
+            container.innerHTML = html;
+        }
+
+        function goPage(page) {
+            currentPage = page;
+            loadCustomers();
+        }
+
+        // ========== 重置筛选 ==========
+        function resetFilters() {
+            document.getElementById("search-input").value = "";
+            document.getElementById("wechat-status-filter").value = "";
+            document.getElementById("intent-level-filter").value = "";
+            currentPage = 1;
+            loadCustomers();
+        }
+
+        // ========== 加载统计数据 ==========
+        async function loadStats() {
+            try {
+                // 总数
+                const res = await fetch(`${API_BASE}/list?page=1&page_size=1`);
+                const data = await res.json();
+                if (data.code === 0) {
+                    document.getElementById("stat-total").textContent = data.data.total;
+                }
+
+                // 已加微信
+                const resAdded = await fetch(`${API_BASE}/list?page=1&page_size=1&wechat_status=added`);
+                const dataAdded = await resAdded.json();
+                if (dataAdded.code === 0) {
+                    document.getElementById("stat-added").textContent = dataAdded.data.total;
+                }
+
+                // 未加微信
+                const resNone = await fetch(`${API_BASE}/list?page=1&page_size=1&wechat_status=none`);
+                const dataNone = await resNone.json();
+                if (dataNone.code === 0) {
+                    document.getElementById("stat-none").textContent = dataNone.data.total;
+                }
+
+                // 今日新增（简化：用列表第一条估算，或者后端加接口，这里先不实现）
+                document.getElementById("stat-today").textContent = "-";
+
+            } catch (e) {
+                console.error("加载统计失败:", e);
+            }
+        }
+
+        // ========== 查看详情 ==========
+        async function viewDetail(sessionId) {
+            try {
+                const res = await fetch(`${API_BASE}/${sessionId}`);
+                const data = await res.json();
+                if (data.code === 0) {
+                    currentCustomer = data.data;
+                    renderDetail(data.data);
+                    document.getElementById("detail-modal").classList.add("show");
+                }
+            } catch (e) {
+                alert("加载详情失败");
+            }
+        }
+
+        function renderDetail(c) {
+            const body = document.getElementById("detail-body");
+            body.innerHTML = `
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <div class="detail-label">暗号</div>
+                        <div class="detail-value"><span class="secret-code">${c.secret_code || '-'}</span></div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">客户类型</div>
+                        <div class="detail-value">${c.customer_type === 'b_end' ? 'B端合作商' : 'C端散客'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">微信昵称</div>
+                        <div class="detail-value ${c.wechat_nick ? '' : 'empty'}">${c.wechat_nick || '未填写'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">手机号</div>
+                        <div class="detail-value ${c.phone ? '' : 'empty'}">${c.phone || '未填写'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">使用场景</div>
+                        <div class="detail-value ${c.scenes ? '' : 'empty'}">${c.scenes || '未收集'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">面积</div>
+                        <div class="detail-value ${c.area ? '' : 'empty'}">${c.area || '未收集'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">偏好</div>
+                        <div class="detail-value ${c.preference ? '' : 'empty'}">${c.preference || '未收集'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">计价方式</div>
+                        <div class="detail-value ${c.pricing_method ? '' : 'empty'}">${c.pricing_method === 'projection' ? '投影面积' : c.pricing_method === 'expand' ? '展开面积' : '未选择'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">小区/位置</div>
+                        <div class="detail-value ${c.community ? '' : 'empty'}">${c.community || '未收集'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">装修进度</div>
+                        <div class="detail-value ${c.decoration_progress ? '' : 'empty'}">${c.decoration_progress || '未收集'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">是否量房</div>
+                        <div class="detail-value">${c.has_measurement ? '已量房' : '未量房'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">意向等级</div>
+                        <div class="detail-value">${c.intent_level || '未评定'}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">加微信状态</div>
+                        <div class="detail-value">${renderWechatStatus(c.wechat_status)}</div>
+                    </div>
+                    <div class="detail-item">
+                        <div class="detail-label">来源渠道</div>
+                        <div class="detail-value ${c.source_channel ? '' : 'empty'}">${c.source_channel || '未标记'}</div>
+                    </div>
+                </div>
+                <div class="detail-item" style="margin-top: 12px;">
+                    <div class="detail-label">备注</div>
+                    <div class="detail-value ${c.remark ? '' : 'empty'}">${c.remark || '无'}</div>
+                </div>
+                <div style="margin-top: 16px; font-size: 12px; color: #9a9ac5;">
+                    创建时间：${c.created_at ? c.created_at.replace('T', ' ') : '-'}<br>
+                    更新时间：${c.updated_at ? c.updated_at.replace('T', ' ') : '-'}
+                </div>
+            `;
+        }
+
+        function closeDetailModal() {
+            document.getElementById("detail-modal").classList.remove("show");
+        }
+
+        // ========== 编辑客户 ==========
+        function openEditModal() {
+            if (!currentCustomer) return;
+
+            const c = currentCustomer;
+            document.getElementById("edit-customer-type").value = c.customer_type || "c_end";
+            document.getElementById("edit-intent-level").value = c.intent_level || "";
+            document.getElementById("edit-wechat-nick").value = c.wechat_nick || "";
+            document.getElementById("edit-phone").value = c.phone || "";
+            document.getElementById("edit-scenes").value = c.scenes || "";
+            document.getElementById("edit-area").value = c.area || "";
+            document.getElementById("edit-preference").value = c.preference || "";
+            document.getElementById("edit-pricing-method").value = c.pricing_method || "";
+            document.getElementById("edit-community").value = c.community || "";
+            document.getElementById("edit-decoration-progress").value = c.decoration_progress || "";
+            document.getElementById("edit-has-measurement").value = c.has_measurement ?? 0;
+            document.getElementById("edit-wechat-status").value = c.wechat_status || "none";
+            document.getElementById("edit-source-channel").value = c.source_channel || "";
+            document.getElementById("edit-remark").value = c.remark || "";
+
+            closeDetailModal();
+            document.getElementById("edit-modal").classList.add("show");
+        }
+
+        function closeEditModal() {
+            document.getElementById("edit-modal").classList.remove("show");
+        }
+
+        async function saveCustomer() {
+            if (!currentCustomer) return;
+
+            const data = {
+                customer_type: document.getElementById("edit-customer-type").value,
+                intent_level: document.getElementById("edit-intent-level").value || null,
+                wechat_nick: document.getElementById("edit-wechat-nick").value || null,
+                phone: document.getElementById("edit-phone").value || null,
+                scenes: document.getElementById("edit-scenes").value || null,
+                area: document.getElementById("edit-area").value || null,
+                preference: document.getElementById("edit-preference").value || null,
+                pricing_method: document.getElementById("edit-pricing-method").value || null,
+                community: document.getElementById("edit-community").value || null,
+                decoration_progress: document.getElementById("edit-decoration-progress").value || null,
+                has_measurement: parseInt(document.getElementById("edit-has-measurement").value),
+                wechat_status: document.getElementById("edit-wechat-status").value,
+                source_channel: document.getElementById("edit-source-channel").value || null,
+                remark: document.getElementById("edit-remark").value || null,
+            };
+
+            // 清理空值
+            Object.keys(data).forEach(key => {
+                if (data[key] === null || data[key] === "") delete data[key];
+            });
+
+            try {
+                const res = await fetch(`${API_BASE}/${currentCustomer.session_id}`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(data)
+                });
+                const result = await res.json();
+                if (result.code === 0) {
+                    closeEditModal();
+                    loadCustomers();
+                    loadStats();
+                } else {
+                    alert("保存失败：" + result.message);
+                }
+            } catch (e) {
+                alert("保存失败");
+            }
+        }
+
+        // ========== 标记加微信 ==========
+        function openWechatModal(sessionId) {
+            currentCustomer = { session_id: sessionId };
+            document.getElementById("wechat-nick-input").value = "";
+            document.getElementById("wechat-modal").classList.add("show");
+        }
+
+        function closeWechatModal() {
+            document.getElementById("wechat-modal").classList.remove("show");
+        }
+
+        async function markWechatAdded() {
+            if (!currentCustomer) return;
+
+            const wechatNick = document.getElementById("wechat-nick-input").value.trim();
+            if (!wechatNick) {
+                alert("请输入微信昵称");
+                return;
+            }
+
+            try {
+                const res = await fetch(`${API_BASE}/${currentCustomer.session_id}/wechat`, {
+                    method: "PUT",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ wechat_nick: wechatNick })
+                });
+                const result = await res.json();
+                if (result.code === 0) {
+                    closeWechatModal();
+                    loadCustomers();
+                    loadStats();
+                } else {
+                    alert("标记失败：" + result.message);
+                }
+            } catch (e) {
+                alert("标记失败");
+            }
+        }
+
+        // 点击遮罩关闭弹窗
+        document.querySelectorAll(".modal-mask").forEach(mask => {
+            mask.addEventListener("click", function(e) {
+                if (e.target === this) {
+                    this.classList.remove("show");
+                }
+            });
+        });
+    </script>
+</body>
+</html>

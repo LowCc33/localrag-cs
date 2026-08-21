@@ -7,27 +7,25 @@
     - 内存会话管理（最多100个，LRU淘汰，30分钟超时自动清理）
     - 非流式：直接返回完整答案
     - 流式：逐字模拟打字效果（SSE）
+    - 客户档案自动建档 + 信息收集 + 结尾生成
 """
 
 import asyncio
 import time
 from collections import OrderedDict
-from typing import Optional
+from typing import Dict, Any
 
-import yaml
-
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
-# 导入客服引擎（customer_service 在项目根目录）
-import sys
-from pathlib import Path
-PROJECT_ROOT = Path(__file__).parent.parent.absolute()
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
 from customer_service.engine import CustomerServiceEngine
+from customer_service.customer import (
+    customer_db,
+    InfoExtractor,
+    EndingGenerator,
+)
+from customer_service.shop_config_loader import load_shop_config
 
 router = APIRouter()
 
@@ -40,7 +38,7 @@ router = APIRouter()
 MAX_SESSIONS = 100            # 最大会话数
 SESSION_TIMEOUT = 30 * 60     # 会话超时时间（秒）= 30分钟
 
-# 会话字典：{ session_id: { "engine": engine, "last_active": timestamp } }
+# 会话字典：{ session_key: { "engine": engine, "last_active": timestamp, "customer_state": {...} } }
 _sessions: "OrderedDict[str, dict]" = OrderedDict()
 
 
@@ -51,12 +49,38 @@ def _session_key(session_id: str, shop_id: str = None) -> str:
     return f"default:{session_id}"
 
 
-def _get_or_create_session(session_id: str, shop_id: str = None) -> CustomerServiceEngine:
+def _init_customer_state(session_id: str, shop_id: str = None) -> Dict[str, Any]:
+    """
+    初始化客户相关状态：建档 + 初始化状态表
+    返回客户状态字典
+    """
+    # 1. 建档（自动生成暗号）
+    customer = customer_db.create_customer(
+        session_id=session_id,
+        shop_id=shop_id,
+    )
+
+    # 2. 初始化会话级状态
+    customer_state = {
+        "session_id": session_id,
+        "secret_code": customer["secret_code"],
+        "round_count": 0,                 # 对话轮次
+        "delivered_points": {},           # 已传达的卖点
+        "wechat_push_count": 0,           # 加微信推送次数
+        "collected_info": {},             # 已收集信息镜像（跟DB同步）
+    }
+    return customer_state
+
+
+def _get_or_create_session(session_id: str, shop_id: str = None) -> tuple:
     """
     获取或创建会话
     - 存在：移到末尾（标记为最新），检查是否超时
-    - 不存在：新建，加入字典末尾
+    - 不存在：新建，加入字典末尾 + 自动建档
     - 超过最大数量：踢最老的
+
+    Returns:
+        (engine, customer_state)
     """
     now = time.time()
     key = _session_key(session_id, shop_id)
@@ -69,20 +93,25 @@ def _get_or_create_session(session_id: str, shop_id: str = None) -> CustomerServ
         _sessions.move_to_end(key)
         sess = _sessions[key]
         sess["last_active"] = now
-        return sess["engine"]
+        return sess["engine"], sess.get("customer_state", {})
     else:
         # 新建会话（带上商家配置）
         engine = CustomerServiceEngine(shop_id=shop_id)
+
+        # 初始化客户状态（建档）
+        customer_state = _init_customer_state(session_id, shop_id)
+
         _sessions[key] = {
             "engine": engine,
             "last_active": now,
             "shop_id": shop_id,
+            "customer_state": customer_state,
         }
         # 超过上限，踢最老的
         if len(_sessions) > MAX_SESSIONS:
             oldest_key = next(iter(_sessions))
             del _sessions[oldest_key]
-        return engine
+        return engine, customer_state
 
 
 def _cleanup_expired():
@@ -98,6 +127,77 @@ def _cleanup_expired():
             pass
     for sid in expired_keys:
         del _sessions[sid]
+
+
+def _update_customer_info(session_id: str, user_message: str, customer_state: Dict):
+    """
+    从用户消息中提取信息，更新客户档案和本地状态
+
+    Args:
+        session_id: 会话ID
+        user_message: 用户消息
+        customer_state: 客户状态字典（会被修改）
+    """
+    # 提取信息
+    new_info = InfoExtractor.extract(user_message, customer_state.get("collected_info", {}))
+
+    if new_info:
+        # 更新DB
+        customer_db.update_customer(session_id, **new_info)
+        # 更新本地状态
+        collected = customer_state.get("collected_info", {})
+        collected.update(new_info)
+        customer_state["collected_info"] = collected
+
+
+def _append_ending(
+    answer: str,
+    tag: str,
+    user_message: str,
+    customer_state: Dict,
+    shop_config: Dict,
+) -> str:
+    """
+    在回答末尾追加动态生成的结尾（卖点补充 + 信息收集 + 加微信引导）
+
+    Args:
+        answer: 原始回答
+        tag: 回答标签
+        user_message: 用户消息
+        customer_state: 客户状态（会被更新）
+        shop_config: 店铺配置
+
+    Returns:
+        带结尾的完整回答
+    """
+    try:
+        generator = EndingGenerator(shop_config)
+
+        ending, new_delivered, new_wechat_count = generator.generate(
+            current_answer_tag=tag,
+            user_message=user_message,
+            original_answer=answer,
+            collected_info=customer_state.get("collected_info", {}),
+            delivered_points=customer_state.get("delivered_points", {}),
+            wechat_push_count=customer_state.get("wechat_push_count", 0),
+            round_count=customer_state.get("round_count", 0),
+            secret_code=customer_state.get("secret_code", ""),
+        )
+
+        # 更新状态
+        customer_state["delivered_points"] = new_delivered
+        customer_state["wechat_push_count"] = new_wechat_count
+
+        if ending:
+            return answer + "\n\n" + ending
+
+    except Exception as e:
+        # 结尾生成失败不影响主回答
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(f"生成结尾失败: {e}")
+
+    return answer
 
 
 # ==================== 请求/响应模型 ====================
@@ -124,11 +224,25 @@ async def ask(req: AskRequest):
     请求：{ "question": "xxx", "session_id": "xxx", "shop_id": "xxx" }
     返回：{ "tag": "bargain/probe", "answer": "话术内容" }
     """
-    engine = _get_or_create_session(req.session_id, req.shop_id)
+    engine, customer_state = _get_or_create_session(req.session_id, req.shop_id)
+
+    # 对话轮次 +1
+    customer_state["round_count"] = customer_state.get("round_count", 0) + 1
+
+    # 从用户消息提取信息，更新客户档案
+    _update_customer_info(req.session_id, req.question, customer_state)
+
+    # 主回答
     tag, answer = engine.reply(req.question)
+
+    # 追加结尾（卖点补充 + 信息收集 + 加微信引导）
+    shop_config = load_shop_config(req.shop_id)
+    answer = _append_ending(answer, tag, req.question, customer_state, shop_config)
+
     return JSONResponse(content={
         "tag": tag,
         "answer": answer,
+        "secret_code": customer_state.get("secret_code", ""),
     })
 
 
@@ -144,8 +258,20 @@ async def ask_stream(req: AskRequest):
         - tag: 话术分类标签（在文本之前发送）
         - done: 结束
     """
-    engine = _get_or_create_session(req.session_id, req.shop_id)
+    engine, customer_state = _get_or_create_session(req.session_id, req.shop_id)
+
+    # 对话轮次 +1
+    customer_state["round_count"] = customer_state.get("round_count", 0) + 1
+
+    # 从用户消息提取信息，更新客户档案
+    _update_customer_info(req.session_id, req.question, customer_state)
+
+    # 主回答
     tag, answer = engine.reply(req.question)
+
+    # 追加结尾
+    shop_config = load_shop_config(req.shop_id)
+    answer = _append_ending(answer, tag, req.question, customer_state, shop_config)
 
     async def generate():
         # 先发 tag 事件，让前端知道分类
@@ -185,6 +311,11 @@ async def clear_session(req: ClearRequest):
     if key in _sessions:
         engine = _sessions[key]["engine"]
         engine.clear()
+        # 重置客户状态中的轮次等计数器，但保留已收集的信息
+        customer_state = _sessions[key].get("customer_state", {})
+        customer_state["round_count"] = 0
+        customer_state["delivered_points"] = {}
+        customer_state["wechat_push_count"] = 0
         # 更新最后活跃时间
         _sessions[key]["last_active"] = time.time()
         _sessions.move_to_end(key)
@@ -194,14 +325,13 @@ async def clear_session(req: ClearRequest):
 # ==================== 接口4：获取欢迎语和商家信息 ====================
 
 @router.get("/welcome")
-async def welcome(shop_id: str = None):
+async def welcome(shop_id: str = None, session_id: str = None):
     """
     获取欢迎语和商家基本信息
-    参数：shop_id（可选，不传用默认配置）
+    参数：shop_id（可选，不传用默认配置），session_id（可选，传了就建档）
     返回：{ "shop_name": "...", "welcome_text": "...", "quick_questions": [...] }
     """
     # 读取商家配置（支持多商家）
-    from customer_service.shop_config_loader import load_shop_config
     config = load_shop_config(shop_id)
 
     shop_name = config.get("shop_name", "佳美全屋定制")
@@ -214,6 +344,12 @@ async def welcome(shop_id: str = None):
         service_name = f"小{boss_last_name}"
 
     welcome_text = f"您好！我是{shop_name}的客服{service_name}，很高兴为您服务。请问您是想咨询柜子定制吗？😊"
+
+    # 如果传了 session_id，提前建档
+    secret_code = ""
+    if session_id:
+        customer = customer_db.create_customer(session_id=session_id, shop_id=shop_id)
+        secret_code = customer["secret_code"]
 
     # 快捷问题
     quick_questions = [
@@ -229,4 +365,5 @@ async def welcome(shop_id: str = None):
         "service_name": service_name,
         "welcome_text": welcome_text,
         "quick_questions": quick_questions,
+        "secret_code": secret_code,
     })
