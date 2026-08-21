@@ -172,6 +172,28 @@ class EndingGenerator:
 
     # ========== 主入口：生成结尾 ==========
 
+    # ========== 卖点反相关关键词（用户说这些话时，某些卖点绝对不能推） ==========
+    SELLING_POINT_ANTI_TOPICS = {
+        "price_range": [
+            # 用户问价格/优惠时，不推价格区间卖点（避免显得价格很乱）
+            "优惠", "便宜", "多少钱", "价格", "砍价", "再少", "打个折",
+            "能不能少", "便宜点", "优惠点", "能不能便宜",
+        ],
+        "factory_direct": [
+            # 用户要档次/品质/高端时，不推工厂直营/性价比卖点（拉低档次）
+            "档次", "品质", "高端", "好一点", "最好", "顶级", "奢华",
+            "上档次", "有面子", "好的", "贵一点", "不差钱",
+        ],
+        "moisture_proof": [
+            # 用户问环保/甲醛时，不推防潮卖点（用户关心的不是这个）
+            "环保", "甲醛", "味", "E0", "enf", "孩子", "宝宝", "孕妇",
+        ],
+        "durable": [
+            # 用户问价格/便宜时，不推耐用卖点（牛头不对马嘴）
+            "便宜", "优惠", "多少钱", "砍价", "性价比高", "省钱",
+        ],
+    }
+
     def generate(
         self,
         current_answer_tag: str,
@@ -182,59 +204,56 @@ class EndingGenerator:
         wechat_push_count: int = 0,
         round_count: int = 0,
         secret_code: str = "",
-    ) -> Tuple[str, Dict, int]:
+        last_round_had_wechat: bool = False,
+    ) -> Tuple[str, Dict, int, bool]:
         """
         生成对话结尾
+
+        策略（修复2：每轮最多2个模块，优先级 信息收集 > 加微信 > 卖点）：
+        - 第1优先级：信息收集提问（有未收集的就问1个）
+        - 第2优先级：加微信引导（满足条件且推过<3次且上一轮没推）
+        - 第3优先级：卖点补充（前两个加起来<2个的时候才补，宁缺毋滥）
 
         Args:
             current_answer_tag: 当前回答的话术标签（用于判断是否该加微信）
             user_message: 用户当前的消息（用于判断卖点相关性）
-            original_answer: 引擎返回的原始回答（用于检测是否已有加微信内容，避免重复）
-            collected_info: 已收集信息表 {field: True/False 或 具体值}
+            original_answer: 引擎返回的原始回答（用于检测是否已有加微信/信息提问，避免重复）
+            collected_info: 已收集信息表 {field: 值}
             delivered_points: 已传达卖点表 {point_key: True/False}
             wechat_push_count: 已推送加微信的次数
             round_count: 当前对话轮次
             secret_code: 客户暗号
+            last_round_had_wechat: 上一轮有没有推加微信（用于控制不连续推）
 
         Returns:
-            (结尾文本, 更新后的delivered_points, 更新后的wechat_push_count)
+            (结尾文本, 更新后的delivered_points, 更新后的wechat_push_count, 本轮是否推了加微信)
         """
         ending_parts = []
         new_delivered = dict(delivered_points) if delivered_points else {}
         new_wechat_count = wechat_push_count
+        this_round_had_wechat = False
 
         # 兼容旧调用：collected_info 为 None 时用空 dict
         if collected_info is None:
             collected_info = {}
 
-        # 检测原回答里是否已经有加微信内容（避免重复推送）
+        # 检测原回答里是否已经有加微信内容
         has_wechat_in_answer = self._has_wechat_content(original_answer)
 
-        # 1. 卖点补充（每2-3轮补一次，挑相关的）
-        if round_count >= 2 and round_count % random.randint(2, 3) == 0:
-            selling_point_text, point_key = self._pick_selling_point(
-                user_message, new_delivered
-            )
-            if selling_point_text:
-                ending_parts.append(selling_point_text)
-                new_delivered[point_key] = True
+        # 原回答里已经有加微信 → 结尾模块绝对不追加，连计数都不增加
+        # （修复3：严格去重，原回答有就完全不插手）
+        wechat_blocked = has_wechat_in_answer
 
-        # 2. 信息收集提问（按优先级挑1个还没收集的）
-        #    如果原回答里已经问过了，就不再重复问
+        # ===== 第1优先级：信息收集提问 =====
         info_question = self._pick_info_question(collected_info, original_answer)
         if info_question:
             ending_parts.append(info_question)
 
-        # 3. 转化引导（加微信）
-        # 注意：如果原回答里已经有加微信内容，就不重复推了，但计数+1（控制总次数）
-        if has_wechat_in_answer:
-            # 原回答已经推过了，记一次账
-            if wechat_push_count < 3:
-                new_wechat_count = wechat_push_count + 1
-        else:
+        # ===== 第2优先级：加微信引导 =====
+        if not wechat_blocked:
             wechat_text, should_push = self._should_push_wechat(
                 current_answer_tag, user_message, collected_info,
-                wechat_push_count, round_count
+                wechat_push_count, round_count, last_round_had_wechat
             )
             if should_push and wechat_text:
                 ending_parts.append(wechat_text.format(
@@ -242,10 +261,32 @@ class EndingGenerator:
                     wechat_id=self.config.get("wechat_id", ""),
                 ))
                 new_wechat_count += 1
+                this_round_had_wechat = True
+
+        # ===== 第3优先级：卖点补充（前两个加起来 < 2个的时候才补） =====
+        # 宁缺毋滥：不相关的宁愿不推，也不乱推
+        if len(ending_parts) < 2:
+            # 卖点补充频率：每2-3轮补一次，不是每轮都补
+            should_add_point = round_count >= 2 and (round_count % random.randint(2, 3) == 0)
+            # 如果前面两个模块一个都没触发，哪怕没到频率也补一个（别太空了）
+            if len(ending_parts) == 0:
+                should_add_point = True
+
+            if should_add_point:
+                selling_point_text, point_key = self._pick_selling_point(
+                    user_message, new_delivered, current_answer_tag
+                )
+                if selling_point_text:
+                    ending_parts.append(selling_point_text)
+                    new_delivered[point_key] = True
+
+        # 保险：最终再检查一遍模块数量，确保 <= 2（修复2：控量硬限制）
+        if len(ending_parts) > 2:
+            ending_parts = ending_parts[:2]
 
         # 拼接结尾
         ending = "\n".join(ending_parts) if ending_parts else ""
-        return ending, new_delivered, new_wechat_count
+        return ending, new_delivered, new_wechat_count, this_round_had_wechat
 
     # ========== 卖点补充逻辑 ==========
 
@@ -253,13 +294,16 @@ class EndingGenerator:
         self,
         user_message: str,
         delivered_points: Dict,
+        current_answer_tag: str = "",
     ) -> Tuple[Optional[str], Optional[str]]:
         """
         挑选一个还没说过的相关卖点
+        先过滤反相关的，再从相关的里挑，都没有就不推（宁缺毋滥）
 
         Args:
             user_message: 用户消息（用于判断相关性）
             delivered_points: 已传达的卖点
+            current_answer_tag: 当前回答标签（议价等场景下过滤价格类卖点）
 
         Returns:
             (卖点文本, 卖点key)，没有合适的返回 (None, None)
@@ -272,15 +316,33 @@ class EndingGenerator:
         if not undelivered:
             return None, None
 
-        # 先挑跟当前问题相关的
-        relevant = []
+        # ===== 修复4：反相关过滤（宁缺毋滥） =====
+        # 先过滤掉不能推的卖点
+        allowed = []
         for key in undelivered:
+            anti_topics = self.SELLING_POINT_ANTI_TOPICS.get(key, [])
+            if anti_topics and any(topic in user_message for topic in anti_topics):
+                continue  # 反相关，跳过
+            # 议价状态机里（在谈价格了），不推任何价格类卖点
+            bargain_tags = ["bargain", "议价", "砍价", "还价"]
+            if key in ("price_range", "factory_direct") and any(
+                t in current_answer_tag.lower() for t in bargain_tags
+            ):
+                continue
+            allowed.append(key)
+
+        if not allowed:
+            return None, None
+
+        # 先挑跟当前问题正相关的
+        relevant = []
+        for key in allowed:
             point = self.SELLING_POINTS[key]
             if any(topic in user_message for topic in point["relevance_topics"]):
                 relevant.append(key)
 
-        # 有相关的，从相关里选；没有就从未说过的里面随机选
-        candidates = relevant if relevant else undelivered
+        # 有正相关的从相关里选，没有就从允许的里面随机选
+        candidates = relevant if relevant else allowed
         if not candidates:
             return None, None
 
@@ -372,6 +434,7 @@ class EndingGenerator:
         collected_info: Dict,
         wechat_push_count: int,
         round_count: int,
+        last_round_had_wechat: bool = False,
     ) -> Tuple[Optional[str], bool]:
         """
         判断是否应该推送加微信
@@ -382,12 +445,17 @@ class EndingGenerator:
         - 收集到核心信息（场景+面积）后，可以提1次
         - 客户说"考虑考虑""再想想"，一定要提
         - 同一场对话加微信推送不超过3次
+        - 相邻两轮不能连续推（修复3：至少隔1轮）
 
         Returns:
             (话术模板, 是否应该推送)
         """
         # 超过3次就不再推了
         if wechat_push_count >= 3:
+            return None, False
+
+        # 上一轮刚推过，这一轮不推（修复3：不连续轰炸）
+        if last_round_had_wechat:
             return None, False
 
         # 前2轮不提

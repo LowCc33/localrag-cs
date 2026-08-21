@@ -24,6 +24,7 @@ from customer_service.customer import (
     customer_db,
     InfoExtractor,
     EndingGenerator,
+    AnswerCleaner,
 )
 from customer_service.shop_config_loader import load_shop_config
 
@@ -173,7 +174,7 @@ def _append_ending(
     try:
         generator = EndingGenerator(shop_config)
 
-        ending, new_delivered, new_wechat_count = generator.generate(
+        ending, new_delivered, new_wechat_count, this_round_had_wechat = generator.generate(
             current_answer_tag=tag,
             user_message=user_message,
             original_answer=answer,
@@ -182,11 +183,13 @@ def _append_ending(
             wechat_push_count=customer_state.get("wechat_push_count", 0),
             round_count=customer_state.get("round_count", 0),
             secret_code=customer_state.get("secret_code", ""),
+            last_round_had_wechat=customer_state.get("last_round_had_wechat", False),
         )
 
         # 更新状态
         customer_state["delivered_points"] = new_delivered
         customer_state["wechat_push_count"] = new_wechat_count
+        customer_state["last_round_had_wechat"] = this_round_had_wechat
 
         if ending:
             return answer + "\n\n" + ending
@@ -235,6 +238,10 @@ async def ask(req: AskRequest):
     # 主回答
     tag, answer = engine.reply(req.question)
 
+    # 清洗答案：移除引擎模板自带的加微信话术和信息收集提问
+    # （修复1：信息收集/加微信 100% 由 ending_generator 统一管控）
+    answer = AnswerCleaner.clean(answer)
+
     # 追加结尾（卖点补充 + 信息收集 + 加微信引导）
     shop_config = load_shop_config(req.shop_id)
     answer = _append_ending(answer, tag, req.question, customer_state, shop_config)
@@ -268,6 +275,9 @@ async def ask_stream(req: AskRequest):
 
     # 主回答
     tag, answer = engine.reply(req.question)
+
+    # 清洗答案：移除引擎模板自带的加微信话术和信息收集提问
+    answer = AnswerCleaner.clean(answer)
 
     # 追加结尾
     shop_config = load_shop_config(req.shop_id)
